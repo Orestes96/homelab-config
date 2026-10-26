@@ -118,7 +118,7 @@
       <rect class="lane" x="460" y="130" width="210" height="100" fill="var(--soft-iot)" stroke="var(--iot)"/>
       <text class="h" x="476" y="156" fill="var(--iot)">IoT</text>
       <text class="t2" x="476" y="176">VLAN 40 · 192.168.40.0/24</text>
-      <text class="t2" x="476" y="196">garage Pi: Home Assistant</text>
+      <text class="t2" x="476" y="196">Pi: Home Assistant, AdGuard</text>
       <text class="t2" x="476" y="214">ACL: ping to Server_Lab only</text>
     </g>
 
@@ -146,7 +146,7 @@
       <text class="t" x="560" y="352" text-anchor="middle">Fire Stick (Panasonic TV)</text>
       <text class="t" x="560" y="374" text-anchor="middle">iPhone</text>
       <text class="t" x="560" y="396" text-anchor="middle">laptops, guests</text>
-      <text class="t2" x="560" y="440" text-anchor="middle">DNS: 192.168.20.100</text>
+      <text class="t2" x="560" y="440" text-anchor="middle">DNS: .20.100, .40.100</text>
     </g>
     <path id="edge-ap-clients" class="edge-house" d="M430 335 H470" marker-end="url(#arrow)"/>
     <text class="t2" x="250" y="500">DS and 3DS join the Wi-Fi and are pointed at 192.168.20.101 for DNS</text>
@@ -173,10 +173,10 @@
     <g id="dns-note">
       <rect class="box" x="930" y="360" width="210" height="150" rx="8" style="stroke:var(--lab)"/>
       <text class="h" x="946" y="386">Name resolution</text>
-      <text class="t2" x="946" y="408">AdGuard on .20.100:53</text>
+      <text class="t2" x="946" y="408">AdGuard .20.100, Pi .40.100</text>
       <text class="t2" x="946" y="426">*.home.arpa → 192.168.20.100</text>
       <text class="t2" x="946" y="444">handed out by ER605 DHCP</text>
-      <text class="t2" x="946" y="462">on House and Server_Lab</text>
+      <text class="t2" x="946" y="462">House both, Server_Lab one</text>
       <text class="t2" x="946" y="490">IoT still on ISP resolvers</text>
     </g>
 
@@ -232,7 +232,7 @@
       <g id="svc-uc"><text class="t" x="316" y="306">uc</text><text class="t" x="520" y="306">University Challenge trainer</text><text class="t" x="780" y="306">8000</text></g>
       <g id="svc-quiz"><text class="t" x="316" y="332">quiz / quiz-staging</text><text class="t" x="520" y="332">Quiz platform</text><text class="t" x="780" y="332">3005 / 3004</text></g>
       <g id="svc-assets"><text class="t" x="316" y="358">assets / assets-staging</text><text class="t" x="520" y="358">Network asset app</text><text class="t" x="780" y="358">3002 / 3001</text></g>
-      <g id="svc-maps"><text class="t" x="316" y="384">maps</text><text class="t" x="520" y="384">this page</text><text class="t" x="780" y="384">3011</text></g>
+      <g id="svc-maps"><text class="t" x="316" y="384">maps / status</text><text class="t" x="520" y="384">this page / Uptime Kuma</text><text class="t" x="780" y="384">3011 / 3012</text></g>
       <g id="svc-vault"><text class="t" x="316" y="420">192.168.20.100:8443</text><text class="t" x="520" y="420">Vaultwarden, HTTPS, self-signed</text><text class="t" x="780" y="420">8080</text></g>
       <text class="t2" x="316" y="446">All names end in .home.arpa</text>
     </g>
@@ -242,7 +242,7 @@
     <g id="non-web">
       <rect class="box" x="890" y="40" width="270" height="260" rx="8"/>
       <text class="h" x="906" y="66">Not behind Caddy</text>
-      <g id="svc-dns"><text class="t" x="906" y="96">AdGuard DNS</text><text class="t2" x="906" y="114">.100:53, LAN-wide</text></g>
+      <g id="svc-dns"><text class="t" x="906" y="96">AdGuard DNS</text><text class="t2" x="906" y="114">.100:53 and Pi .40.100:53</text></g>
       <g id="svc-ollama"><text class="t" x="906" y="142">Ollama</text><text class="t2" x="906" y="160">127.0.0.1:11434, local only</text></g>
       <g id="svc-wfc"><text class="t" x="906" y="188">WFC server (AltWFC)</text><text class="t2" x="906" y="206">nginx .102:80/443, dnsmasq .101:53</text><text class="t2" x="906" y="224">DS and 3DS only</text></g>
       <g id="svc-runners"><text class="t" x="906" y="252">GitHub Actions runners</text><text class="t2" x="906" y="270">two, self-hosted CI</text></g>

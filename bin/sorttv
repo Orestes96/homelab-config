@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Usage: sorttv "RIP_FOLDER" "Show Name" SEASON FIRST_EPISODE [MIN_MINUTES]
+# Usage: sorttv "RIP_FOLDER" "Show Name" SEASON FIRST_EPISODE [MIN_MINUTES] [MAX_MINUTES] [EXPECTED]
 # Titles are processed in disc order: the number after the final "_t" in the
 # file name, which MakeMKV adds by default.
-#   longer than 2.5x MIN_MINUTES  -> treated as "Play All" and DELETED
-#   longer than MIN_MINUTES       -> episode, numbered from FIRST_EPISODE
-#   shorter                       -> extras/
-# MIN_MINUTES defaults to 18.
+#   longer than 2.5x MIN_MINUTES      -> treated as "Play All" and DELETED
+#   MIN_MINUTES to MAX_MINUTES incl.  -> episode, numbered from FIRST_EPISODE
+#   anything else                     -> extras/
+# MIN defaults to 18, MAX to MIN+5. When EXPECTED is given, no more than that
+# many episodes are numbered; surplus goes to extras/ with a warning.
+# An episode file that already exists is never overwritten.
 set -euo pipefail
 
 src="/srv/media/rips/$1"
@@ -13,13 +15,17 @@ show="$2"
 season="$3"
 ep="$4"
 min="${5:-18}"
+max="${6:-$((min + 5))}"
+expected="${7:-}"
 
 dest=$(printf "/srv/media/rips/tv/%s/Season %02d" "$show" "$season")
 extras="/srv/media/rips/extras/$show"
 mkdir -p "$dest" "$extras"
 
 minsecs=$((min * 60))
+maxsecs=$((max * 60))
 playall=$((minsecs * 5 / 2))
+found=0
 
 # List .mkv files in disc order.
 ordered() {
@@ -35,16 +41,30 @@ while IFS= read -r f; do
   if [ "$secs" -ge "$playall" ]; then
     rm -f "$f"
     echo "Deleted play-all: $(basename "$f")  ($secs s)"
-  elif [ "$secs" -ge "$minsecs" ]; then
+  elif [ "$secs" -ge "$minsecs" ] && [ "$secs" -le "$maxsecs" ]; then
     name=$(printf "%s - s%02de%02d.mkv" "$show" "$season" "$ep")
-    mv "$f" "$dest/$name"
-    echo "Episode: $name  ($secs s)"
-    ep=$((ep + 1))
+    if [ -n "$expected" ] && [ "$found" -ge "$expected" ]; then
+      mv "$f" "$extras/"
+      echo "WARNING over count: $(basename "$f")  ($secs s) sent to extras, disc already has $expected episodes"
+    elif [ -e "$dest/$name" ]; then
+      mv "$f" "$extras/"
+      echo "WARNING exists: $name already on disk, $(basename "$f")  ($secs s) sent to extras"
+    else
+      mv "$f" "$dest/$name"
+      echo "Episode: $name  ($secs s)"
+      ep=$((ep + 1))
+      found=$((found + 1))
+    fi
   else
     mv "$f" "$extras/"
     echo "Extra:   $(basename "$f")  ($secs s)"
   fi
 done < <(ordered)
 
-rmdir "$src"
-echo "Next episode number: $ep"
+rm -f "$src/.done" "$src/.pending"
+rmdir "$src" 2>/dev/null || echo "Left $src in place (not empty)."
+if [ -n "$expected" ] && [ "$found" -ne "$expected" ]; then
+  echo "WARNING: expected $expected episodes from this disc, got $found. Check extras/ and the season folder."
+else
+  echo "Episodes from this disc: $found"
+fi

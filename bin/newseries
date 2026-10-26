@@ -1,21 +1,43 @@
 #!/usr/bin/env bash
-# Usage: newseries "Show Name" SEASON [MIN_MINUTES]
-# Creates the show folder (so future discs auto-match by label), records the
-# show's minimum episode length, sets series.conf as the manual fallback, and
-# re-triggers any discs parked as .pending.
+# Usage: newseries "Show Name" SEASON "EPS_PER_DISC" [MIN_MINUTES] [MAX_MINUTES]
+#   e.g. newseries "The Simpsons" 7 "6 7 7 5"
+# Registers a season: creates the show folder (so future discs auto-match by
+# label), writes the episodes-per-disc map and min/max episode length into the
+# show's .ripsort (existing values kept unless given), sets series.conf as the
+# manual fallback, and re-triggers any discs parked as .pending.
 set -euo pipefail
-show="$1"; season="$2"; min="${3:-18}"
+show="$1"; season="$2"; discs="$3"
 TV="/srv/media/rips/tv"
-mkdir -p "$TV/$show"
-printf '%s\n' "$min" > "$TV/$show/.minminutes"
+dir="$TV/$show"; cfg="$dir/.ripsort"
+
+[[ "$discs" =~ ^[0-9]+( [0-9]+)*$ ]] || { echo "EPS_PER_DISC must be numbers separated by spaces, e.g. \"6 7 7 5\""; exit 1; }
+
+mkdir -p "$dir"
+unset MIN_MINUTES MAX_MINUTES; unset "${!DISCS_S@}"
+# shellcheck source=/dev/null
+[ -f "$cfg" ] && source "$cfg"
+[ -z "${MIN_MINUTES:-}" ] && [ -f "$dir/.minminutes" ] && MIN_MINUTES=$(cat "$dir/.minminutes")
+min="${4:-${MIN_MINUTES:-18}}"
+max="${5:-${MAX_MINUTES:-$((min + 5))}}"
+declare "DISCS_S$season=$discs"
+
+{
+  echo "# ripsort config for $show. An episode is MIN to MAX minutes inclusive."
+  echo "MIN_MINUTES=$min"
+  echo "MAX_MINUTES=$max"
+  echo "# Episodes per disc, one map per season."
+  for v in $(printf '%s\n' "${!DISCS_S@}" | sort -V); do echo "$v=\"${!v}\""; done
+} > "$cfg"
+rm -f "$dir/.minminutes"
+
 cat > "$HOME/.config/ripsort/series.conf" <<CONF
 # Fallback for discs whose label cannot be read. MODE: tv | film | off
 MODE=tv
 SHOW="$show"
 SEASON_DEFAULT=$season
-MIN_MINUTES=$min
 # Only used when MODE=film
 TITLE="Film Name (Year)"
 CONF
+
 for m in /srv/media/rips/*/.pending; do [ -e "$m" ] && mv "$m" "$(dirname "$m")/.done"; done
-echo "Ready for $show season $season (min $min min). Parked discs re-queued."
+echo "Ready for $show season $season: discs ($discs), episodes $min-$max min. Parked discs re-queued."
