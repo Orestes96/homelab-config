@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# Run by cron every minute. Sorts any rip folder containing a .done marker.
+# TV discs are identified from the disc label (show, season); the first episode
+# number is the count of episodes already in that season folder plus one.
+# Unknown shows are parked (.pending) and reported; run newseries to resolve.
+set -uo pipefail
+
+CONF="$HOME/.config/ripsort/series.conf"
+LOG="$HOME/.config/ripsort/ripwatch.log"
+TOPIC=$(cat "$HOME/.ntfy-topic")
+RIPS="/srv/media/rips"
+TV="$RIPS/tv"
+
+exec 9>"$HOME/.config/ripsort/.lock"
+flock -n 9 || exit 0
+
+notify() { curl -s -d "$1" "https://ntfy.sh/$TOPIC" >/dev/null; }
+norm()   { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/^the //; s/[^a-z0-9]//g'; }
+
+# Parse a disc label into SHOW_RAW / SEASON (either may come back empty).
+parse_label() {
+  local label="$1" up
+  up=$(printf '%s' "$label" | tr '[:lower:]' '[:upper:]' | tr ' -' '__')
+  SEASON=$(printf '%s' "$up" | sed -nE 's/.*(SEASON|SERIES|S)_*0*([0-9]{1,2})(_|$|D).*/\2/p' | head -n1)
+  SHOW_RAW=$(printf '%s' "$up" | sed -E 's/_*(SEASON|SERIES|S)_*[0-9]{1,2}.*$//; s/_*(DISC|DISK|D)_*[0-9]{1,2}.*$//; s/_+/ /g; s/^ +| +$//g')
+  case "$SHOW_RAW" in DVD*VIDEO*|DVD|VIDEO|DISC*|UNTITLED*) SHOW_RAW="" ;; esac
+}
+
+# Find an existing show folder whose normalised name matches.
+find_show() {
+  local want; want=$(norm "$1")
+  [ -z "$want" ] && return 1
+  local d
+  for d in "$TV"/*/; do
+    [ -d "$d" ] || continue
+    local name; name=$(basename "$d")
+    if [ "$(norm "$name")" = "$want" ]; then printf '%s' "$name"; return 0; fi
+  done
+  return 1
+}
+
+for marker in "$RIPS"/*/.done; do
+  [ -e "$marker" ] || continue
+  dir=$(dirname "$marker"); folder=$(basename "$dir")
+  rm -f "$marker"
+  # shellcheck source=/dev/null
+  source "$CONF"
+  out=""
+
+  case "${MODE:-off}" in
+    off)
+      out="Sorting is off. $folder left in place." ;;
+    film)
+      out=$("$HOME/bin/sortfilm" "$folder" "$TITLE" 2>&1) ;;
+    tv)
+      parse_label "$folder"
+      show=$(find_show "$SHOW_RAW") || show=""
+      # Fallback to series.conf when the label gives nothing usable.
+      if [ -z "$show" ] && [ -n "${SHOW:-}" ] && { [ -z "$SHOW_RAW" ] || [ "$(norm "$SHOW")" = "$(norm "$SHOW_RAW")" ]; }; then
+        show="$SHOW"
+      fi
+      [ -z "$SEASON" ] && SEASON="${SEASON_DEFAULT:-}"
+      if [ -z "$show" ] || [ -z "$SEASON" ]; then
+        touch "$dir/.pending"
+        out="Unknown disc: $folder (show='${SHOW_RAW:-?}', season='${SEASON:-?}'). Run: newseries \"Show Name\" SEASON [MIN]  then it will sort."
+      else
+        min=$(cat "$TV/$show/.minminutes" 2>/dev/null || echo "${MIN_MINUTES:-18}")
+        seasondir=$(printf "%s/%s/Season %02d" "$TV" "$show" "$SEASON")
+        count=$(ls "$seasondir"/*.mkv 2>/dev/null | wc -l)
+        first=$((count + 1))
+        out=$("$HOME/bin/sorttv" "$folder" "$show" "$SEASON" "$first" "$min" 2>&1)
+      fi ;;
+  esac
+
+  printf "\n== %s  %s ==\n%s\n" "$(date '+%F %T')" "$folder" "$out" >> "$LOG"
+  notify "$folder
+$out"
+done
