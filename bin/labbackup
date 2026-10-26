@@ -1,0 +1,81 @@
+#!/bin/bash
+set -uo pipefail
+umask 077
+
+DEST=/home/elliot/backups/lab
+LOG=/home/elliot/homelab/logs/labbackup.log
+KEEP_DAYS=14
+STAMP=$(date +%F_%H%M)
+OUT="$DEST/labbackup-$STAMP.tar.gz"
+VW=/home/elliot/vaultwarden-data
+QZ=/home/elliot/homelab/quiz-platform/data
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+mkdir -p "$DEST"
+
+FILES=()
+EXCL=()
+
+snap() {
+  local src="$1" name="$2"
+  if command -v sqlite3 >/dev/null 2>&1 && [ -f "$src" ]; then
+    sqlite3 "$src" ".backup '$TMP/$name'" && FILES+=("$name")
+  else
+    echo "$(date -Is) WARNING: could not snapshot $src" >> "$LOG"
+  fi
+}
+
+snap "$VW/db.sqlite3" vaultwarden-db.sqlite3
+snap "$QZ/production.db" quiz-production.db
+snap "$QZ/staging.db" quiz-staging.db
+
+[ -f "$TMP/vaultwarden-db.sqlite3" ] && EXCL+=(--exclude='home/elliot/vaultwarden-data/db.sqlite3*')
+[ -f "$TMP/quiz-production.db" ] && EXCL+=(--exclude='home/elliot/homelab/quiz-platform/data/production.db*')
+[ -f "$TMP/quiz-staging.db" ] && EXCL+=(--exclude='home/elliot/homelab/quiz-platform/data/staging.db*')
+
+if [ "${#FILES[@]}" -gt 0 ]; then
+  EXTRA=(-C "$TMP" "${FILES[@]}")
+else
+  EXTRA=()
+fi
+
+nice -n 19 ionice -c3 tar -czf "$OUT" \
+  --warning=no-file-changed \
+  --exclude='home/elliot/homelab/ollama/models' \
+  --exclude='home/elliot/homelab/plex/config' \
+  --exclude='home/elliot/homelab/plex/transcode' \
+  --exclude='home/elliot/homelab/jellyfin/cache' \
+  --exclude='home/elliot/homelab/network-asset-backups' \
+  --exclude='home/elliot/homelab/quiz-platform-backups' \
+  --exclude='home/elliot/homelab/quiz-platform/data/backups' \
+  --exclude='home/elliot/homelab/adguard/work/data/querylog.json*' \
+  --exclude='home/elliot/uc-trainer/data/media/music/midi' \
+  --exclude='home/elliot/ebooks/config/processed_books' \
+  --exclude='node_modules' \
+  "${EXCL[@]}" \
+  -C / \
+  home/elliot/homelab \
+  home/elliot/vaultwarden-data \
+  home/elliot/uc-trainer \
+  home/elliot/altwfc-mystery-gift \
+  home/elliot/ebooks/config \
+  home/elliot/Caddyfile \
+  home/elliot/caddy-certs \
+  home/elliot/bin \
+  home/elliot/.config/ripsort \
+  etc/docker/daemon.json \
+  "${EXTRA[@]}"
+rc=$?
+
+if [ "$rc" -ne 0 ]; then
+  echo "$(date -Is) FAILED tar exit $rc" >> "$LOG"
+  rm -f "$OUT"
+  chown elliot:elliot "$LOG"
+  exit 1
+fi
+
+chown elliot:elliot "$DEST" "$OUT"
+find "$DEST" -name 'labbackup-*.tar.gz' -mtime +"$KEEP_DAYS" -delete
+echo "$(date -Is) OK $(du -h "$OUT" | cut -f1) $OUT" >> "$LOG"
+chown elliot:elliot "$LOG"

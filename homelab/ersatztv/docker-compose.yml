@@ -1,0 +1,14 @@
+services:
+  ersatztv:
+    image: ghcr.io/ersatztv/ersatztv:latest
+    container_name: ersatztv
+    ports:
+      - "8409:8409"
+    volumes:
+      - ./config:/config
+      - /srv/media:/data:ro
+    tmpfs:
+      - /transcode
+    environment:
+      - TZ=Europe/London
+    restart: unless-stopped

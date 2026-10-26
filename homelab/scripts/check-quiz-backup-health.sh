@@ -1,0 +1,24 @@
+#!/bin/bash
+LOG="/home/elliot/homelab/logs/quiz-backup.log"
+MAX_AGE_HOURS=30
+
+if [ ! -f "$LOG" ]; then
+  logger -t quiz-backup-health "WARNING: backup log missing entirely"
+  exit 1
+fi
+
+LAST_SUCCESS_LINE=$(grep -E "committed and pushed|no changes, skipping commit" "$LOG" | tail -1)
+
+if [ -z "$LAST_SUCCESS_LINE" ]; then
+  logger -t quiz-backup-health "WARNING: quiz-platform backup has never succeeded"
+  exit 1
+fi
+
+LAST_SUCCESS_TIME=$(echo "$LAST_SUCCESS_LINE" | grep -oE '^[0-9T:-]+Z')
+LAST_SUCCESS_EPOCH=$(date -d "$LAST_SUCCESS_TIME" +%s)
+NOW_EPOCH=$(date +%s)
+AGE_HOURS=$(( (NOW_EPOCH - LAST_SUCCESS_EPOCH) / 3600 ))
+
+if [ "$AGE_HOURS" -gt "$MAX_AGE_HOURS" ]; then
+  logger -t quiz-backup-health "WARNING: quiz-platform backup stale, last success $AGE_HOURS hours ago"
+fi

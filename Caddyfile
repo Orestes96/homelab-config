@@ -1,0 +1,73 @@
+{
+    auto_https off
+}
+
+# Vaultwarden, HTTPS on 8443 (unchanged)
+192.168.20.100:8443 {
+    tls /certs/192.168.20.100.pem /certs/192.168.20.100-key.pem
+    reverse_proxy localhost:8080
+}
+
+# LAN services by name, plain HTTP on 80.
+# One block per service: name on the left, host port on the right.
+
+http://home.arpa {
+    reverse_proxy localhost:3010
+}
+
+http://maps.home.arpa {
+    reverse_proxy localhost:3011
+}
+
+http://status.home.arpa {
+    reverse_proxy localhost:3012
+}
+
+http://plex.home.arpa {
+    reverse_proxy localhost:32400
+}
+
+http://jellyfin.home.arpa {
+    reverse_proxy localhost:8096
+}
+
+http://tv.home.arpa {
+    reverse_proxy localhost:8409
+}
+
+http://makemkv.home.arpa {
+    reverse_proxy localhost:5800
+}
+
+http://adguard.home.arpa {
+    reverse_proxy localhost:3000
+}
+
+http://books.home.arpa {
+    reverse_proxy localhost:8083
+}
+
+http://uc.home.arpa {
+    reverse_proxy localhost:8000
+}
+
+http://quiz.home.arpa {
+    reverse_proxy localhost:3005
+}
+
+http://quiz-staging.home.arpa {
+    reverse_proxy localhost:3004
+}
+
+# The network-asset app redirects to HTTPS unless told the hop was already secure.
+http://assets.home.arpa {
+    reverse_proxy localhost:3002 {
+        header_up X-Forwarded-Proto https
+    }
+}
+
+http://assets-staging.home.arpa {
+    reverse_proxy localhost:3001 {
+        header_up X-Forwarded-Proto https
+    }
+}

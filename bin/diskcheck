@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Reports to Uptime Kuma only while /srv/media has more than MIN_GB free.
+# Silence makes the monitor go red.
+MIN_GB=30
+PUSH_URL="http://status.home.arpa/api/push/lQoUMdxKY32VWJDlfO6VK92Czpcvl4EE?status=up&msg=OK&ping="
+free_gb=$(df --output=avail -BG /srv/media | tail -n 1 | tr -dc '0-9')
+if [ "$free_gb" -gt "$MIN_GB" ]; then
+  curl -s -o /dev/null "${PUSH_URL}&msg=${free_gb}GB+free"
+fi

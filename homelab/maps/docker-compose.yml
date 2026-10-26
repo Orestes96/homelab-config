@@ -1,0 +1,10 @@
+services:
+  maps:
+    image: caddy:2
+    container_name: maps
+    command: ["caddy", "file-server", "--root", "/srv", "--listen", ":80"]
+    ports:
+      - "3011:80"
+    volumes:
+      - ./site:/srv:ro
+    restart: unless-stopped

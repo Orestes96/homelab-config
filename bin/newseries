@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Usage: newseries "Show Name" SEASON [MIN_MINUTES]
+# Creates the show folder (so future discs auto-match by label), records the
+# show's minimum episode length, sets series.conf as the manual fallback, and
+# re-triggers any discs parked as .pending.
+set -euo pipefail
+show="$1"; season="$2"; min="${3:-18}"
+TV="/srv/media/rips/tv"
+mkdir -p "$TV/$show"
+printf '%s\n' "$min" > "$TV/$show/.minminutes"
+cat > "$HOME/.config/ripsort/series.conf" <<CONF
+# Fallback for discs whose label cannot be read. MODE: tv | film | off
+MODE=tv
+SHOW="$show"
+SEASON_DEFAULT=$season
+MIN_MINUTES=$min
+# Only used when MODE=film
+TITLE="Film Name (Year)"
+CONF
+for m in /srv/media/rips/*/.pending; do [ -e "$m" ] && mv "$m" "$(dirname "$m")/.done"; done
+echo "Ready for $show season $season (min $min min). Parked discs re-queued."

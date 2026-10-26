@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Usage: sortfilm "RIP_FOLDER" "Title (Year)"
+# Moves the largest .mkv to movies/, the rest to extras/, removes the rip folder.
+set -euo pipefail
+
+src="/srv/media/rips/$1"
+title="$2"
+movies="/srv/media/rips/movies/$title"
+extras="/srv/media/rips/extras/$title"
+
+mkdir -p "$movies" "$extras"
+
+main=$(ls -S "$src"/*.mkv | head -n 1)
+mv "$main" "$movies/$title.mkv"
+
+if ls "$src"/*.mkv >/dev/null 2>&1; then
+  mv "$src"/*.mkv "$extras/"
+fi
+
+rmdir "$src"
+echo "Feature:  $movies/$title.mkv"
+echo "Extras:   $extras/"

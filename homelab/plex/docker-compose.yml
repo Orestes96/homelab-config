@@ -1,0 +1,19 @@
+services:
+  plex:
+    image: plexinc/pms-docker:latest
+    container_name: plex
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      - TZ=Europe/London
+      - PLEX_UID=1000
+      - PLEX_GID=1000
+      - PLEX_CLAIM=claim-gwFJso-N_YxJQpFY8uyB
+    volumes:
+      - ./config:/config
+      - ./transcode:/transcode
+      - /srv/media:/data:ro
+    devices:
+      - /dev/dri:/dev/dri
+    cpus: 2
+    mem_limit: 3g

@@ -1,0 +1,19 @@
+services:
+  makemkv:
+    image: jlesage/makemkv
+    container_name: makemkv
+    ports:
+      - "5800:5800"
+    volumes:
+      - ./config:/config
+      - /srv/media/rips:/output
+    devices:
+      - /dev/sr0
+      - /dev/sg1
+    environment:
+      - USER_ID=1000
+      - GROUP_ID=1000
+      - TZ=Europe/London
+      - AUTO_DISC_RIPPER=1
+      - AUTO_DISC_RIPPER_EJECT=1
+    restart: unless-stopped

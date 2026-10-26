@@ -1,0 +1,15 @@
+services:
+  homepage:
+    image: ghcr.io/gethomepage/homepage:latest
+    container_name: homepage
+    ports:
+      - "3010:3000"
+    dns:
+      - 192.168.20.100
+    volumes:
+      - ./config:/app/config
+    environment:
+      - HOMEPAGE_ALLOWED_HOSTS=home.arpa,192.168.20.100:3010
+      - PUID=1000
+      - PGID=1000
+    restart: unless-stopped

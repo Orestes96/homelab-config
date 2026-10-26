@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Usage: sorttv "RIP_FOLDER" "Show Name" SEASON FIRST_EPISODE [MIN_MINUTES]
+# Titles are processed in disc order: the number after the final "_t" in the
+# file name, which MakeMKV adds by default.
+#   longer than 2.5x MIN_MINUTES  -> treated as "Play All" and DELETED
+#   longer than MIN_MINUTES       -> episode, numbered from FIRST_EPISODE
+#   shorter                       -> extras/
+# MIN_MINUTES defaults to 18.
+set -euo pipefail
+
+src="/srv/media/rips/$1"
+show="$2"
+season="$3"
+ep="$4"
+min="${5:-18}"
+
+dest=$(printf "/srv/media/rips/tv/%s/Season %02d" "$show" "$season")
+extras="/srv/media/rips/extras/$show"
+mkdir -p "$dest" "$extras"
+
+minsecs=$((min * 60))
+playall=$((minsecs * 5 / 2))
+
+# List .mkv files in disc order.
+ordered() {
+  for f in "$src"/*.mkv; do
+    n=$(basename "$f")
+    t=$(printf '%s' "$n" | sed -nE 's/.*_t([0-9]+)\.mkv$/\1/p')
+    printf '%s\t%s\n' "${t:-999}" "$f"
+  done | sort -n | cut -f2-
+}
+
+while IFS= read -r f; do
+  secs=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$f" | cut -d. -f1)
+  if [ "$secs" -ge "$playall" ]; then
+    rm -f "$f"
+    echo "Deleted play-all: $(basename "$f")  ($secs s)"
+  elif [ "$secs" -ge "$minsecs" ]; then
+    name=$(printf "%s - s%02de%02d.mkv" "$show" "$season" "$ep")
+    mv "$f" "$dest/$name"
+    echo "Episode: $name  ($secs s)"
+    ep=$((ep + 1))
+  else
+    mv "$f" "$extras/"
+    echo "Extra:   $(basename "$f")  ($secs s)"
+  fi
+done < <(ordered)
+
+rmdir "$src"
+echo "Next episode number: $ep"
