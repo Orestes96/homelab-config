@@ -7,7 +7,7 @@ set -uo pipefail
 
 CONF="$HOME/.config/ripsort/series.conf"
 LOG="$HOME/.config/ripsort/ripwatch.log"
-TOPIC=$(cat "$HOME/.ntfy-topic")
+TOPIC=$(cat "$HOME/.ntfy-rips-topic")
 RIPS="/srv/media/rips"
 TV="$RIPS/tv"
 

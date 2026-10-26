@@ -3,12 +3,6 @@ set -uo pipefail
 
 LAB="git --git-dir=$HOME/.labrepo --work-tree=$HOME"
 LOG="$HOME/homelab/logs/labsync.log"
-T=$(cat "$HOME/.ntfy-topic" 2>/dev/null)
-
-if [ -z "$T" ]; then
-  echo "$(date -Is) BLOCKED no topic file to check against" >> "$LOG"
-  exit 1
-fi
 
 $LAB add -u
 
@@ -17,11 +11,14 @@ if $LAB diff --cached --quiet; then
   exit 0
 fi
 
-if $LAB grep --cached -q -F "$T"; then
-  $LAB reset -q
-  echo "$(date -Is) BLOCKED topic found in tracked files" >> "$LOG"
-  exit 1
-fi
+for f in "$HOME/.ntfy-topic" "$HOME/.ntfy-rips-topic"; do
+  T=$(cat "$f" 2>/dev/null)
+  if [ -z "$T" ] || $LAB grep --cached -q -F "$T"; then
+    $LAB reset -q
+    echo "$(date -Is) BLOCKED topic file empty or topic found: $f" >> "$LOG"
+    exit 1
+  fi
+done
 
 $LAB commit -q -m "Auto: $(date +%F)"
 
