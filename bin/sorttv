@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Usage: sorttv "RIP_FOLDER" "Show Name" SEASON FIRST_EPISODE [MIN_MINUTES] [MAX_MINUTES] [EXPECTED]
+# Usage: sorttv "RIP_FOLDER" "Show Name" SEASON FIRST_EPISODE [MIN_MINUTES] [MAX_MINUTES] [LAST_EPISODE]
 # Titles are processed in disc order: the number after the final "_t" in the
 # file name, which MakeMKV adds by default.
 #   longer than 2.5x MIN_MINUTES      -> treated as "Play All" and DELETED
 #   MIN_MINUTES to MAX_MINUTES incl.  -> episode, numbered from FIRST_EPISODE
 #   anything else                     -> extras/
-# MIN defaults to 18, MAX to MIN+5. When EXPECTED is given, no more than that
-# many episodes are numbered; surplus goes to extras/ with a warning.
-# An episode file that already exists is never overwritten.
+# MIN defaults to 18, MAX to MIN+5. Numbering never goes past LAST_EPISODE
+# (surplus goes to extras/ with a warning). An episode file that already
+# exists is never overwritten. The final line is EPISODES=N for ripwatch.
 set -euo pipefail
 
 src="/srv/media/rips/$1"
@@ -16,7 +16,7 @@ season="$3"
 ep="$4"
 min="${5:-18}"
 max="${6:-$((min + 5))}"
-expected="${7:-}"
+last="${7:-}"
 
 dest=$(printf "/srv/media/rips/tv/%s/Season %02d" "$show" "$season")
 extras="/srv/media/rips/extras/$show"
@@ -43,9 +43,9 @@ while IFS= read -r f; do
     echo "Deleted play-all: $(basename "$f")  ($secs s)"
   elif [ "$secs" -ge "$minsecs" ] && [ "$secs" -le "$maxsecs" ]; then
     name=$(printf "%s - s%02de%02d.mkv" "$show" "$season" "$ep")
-    if [ -n "$expected" ] && [ "$found" -ge "$expected" ]; then
+    if [ -n "$last" ] && [ "$ep" -gt "$last" ]; then
       mv "$f" "$extras/"
-      echo "WARNING over count: $(basename "$f")  ($secs s) sent to extras, disc already has $expected episodes"
+      echo "WARNING over total: $(basename "$f")  ($secs s) sent to extras, series already has $last episodes"
     elif [ -e "$dest/$name" ]; then
       mv "$f" "$extras/"
       echo "WARNING exists: $name already on disk, $(basename "$f")  ($secs s) sent to extras"
@@ -63,8 +63,5 @@ done < <(ordered)
 
 rm -f "$src/.done" "$src/.pending"
 rmdir "$src" 2>/dev/null || echo "Left $src in place (not empty)."
-if [ -n "$expected" ] && [ "$found" -ne "$expected" ]; then
-  echo "WARNING: expected $expected episodes from this disc, got $found. Check extras/ and the season folder."
-else
-  echo "Episodes from this disc: $found"
-fi
+echo "Episodes from this disc: $found"
+echo "EPISODES=$found"

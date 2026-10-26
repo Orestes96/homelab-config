@@ -1,31 +1,36 @@
 #!/usr/bin/env bash
-# Usage: newseries "Show Name" SEASON "EPS_PER_DISC" [MIN_MINUTES] [MAX_MINUTES]
-#   e.g. newseries "The Simpsons" 7 "6 7 7 5"
-# Registers a season: creates the show folder (so future discs auto-match by
-# label), writes the episodes-per-disc map and min/max episode length into the
-# show's .ripsort (existing values kept unless given), sets series.conf as the
-# manual fallback, and re-triggers any discs parked as .pending.
+# Usage: newseries "Show Name" SEASON TOTAL [EPS_PER_DISC] [MIN_MINUTES] [MAX_MINUTES]
+#   e.g. newseries "Friends" 1 24
+#        newseries "The Simpsons" 7 25 "6 7 7 5"
+# Only needed for a show with no folder yet, or to add/change a series total
+# or disc map. Creates the show folder, updates its .ripsort (existing values
+# kept unless given), sets series.conf as the manual fallback, and re-triggers
+# any discs parked as .pending. Pass "" for EPS_PER_DISC to skip it.
 set -euo pipefail
-show="$1"; season="$2"; discs="$3"
+show="$1"; season="$2"; total="$3"; discs="${4:-}"
 TV="/srv/media/rips/tv"
 dir="$TV/$show"; cfg="$dir/.ripsort"
 
-[[ "$discs" =~ ^[0-9]+( [0-9]+)*$ ]] || { echo "EPS_PER_DISC must be numbers separated by spaces, e.g. \"6 7 7 5\""; exit 1; }
+[[ "$total" =~ ^[0-9]+$ ]] || { echo "TOTAL must be a number (episodes in the series)"; exit 1; }
+[ -z "$discs" ] || [[ "$discs" =~ ^[0-9]+( [0-9]+)*$ ]] || { echo "EPS_PER_DISC must be numbers separated by spaces, e.g. \"6 7 7 5\""; exit 1; }
 
 mkdir -p "$dir"
-unset MIN_MINUTES MAX_MINUTES; unset "${!DISCS_S@}"
+unset MIN_MINUTES MAX_MINUTES; unset "${!DISCS_S@}" "${!TOTAL_S@}"
 # shellcheck source=/dev/null
 [ -f "$cfg" ] && source "$cfg"
 [ -z "${MIN_MINUTES:-}" ] && [ -f "$dir/.minminutes" ] && MIN_MINUTES=$(cat "$dir/.minminutes")
-min="${4:-${MIN_MINUTES:-18}}"
-max="${5:-${MAX_MINUTES:-$((min + 5))}}"
-declare "DISCS_S$season=$discs"
+min="${5:-${MIN_MINUTES:-18}}"
+max="${6:-${MAX_MINUTES:-$((min + 5))}}"
+declare "TOTAL_S$season=$total"
+[ -n "$discs" ] && declare "DISCS_S$season=$discs"
 
 {
   echo "# ripsort config for $show. An episode is MIN to MAX minutes inclusive."
   echo "MIN_MINUTES=$min"
   echo "MAX_MINUTES=$max"
-  echo "# Episodes per disc, one map per season."
+  echo "# Episodes per series. Numbering stops at the total; surplus goes to extras."
+  for v in $(printf '%s\n' "${!TOTAL_S@}" | sort -V); do echo "$v=${!v}"; done
+  echo "# Optional episodes-per-disc maps, e.g. DISCS_S7=\"6 7 7 5\"."
   for v in $(printf '%s\n' "${!DISCS_S@}" | sort -V); do echo "$v=\"${!v}\""; done
 } > "$cfg"
 rm -f "$dir/.minminutes"
@@ -40,4 +45,4 @@ TITLE="Film Name (Year)"
 CONF
 
 for m in /srv/media/rips/*/.pending; do [ -e "$m" ] && mv "$m" "$(dirname "$m")/.done"; done
-echo "Ready for $show season $season: discs ($discs), episodes $min-$max min. Parked discs re-queued."
+echo "Ready for $show series $season: $total episodes${discs:+, discs ($discs)}, episodes $min-$max min. Parked discs re-queued."

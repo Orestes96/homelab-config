@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Run by cron every minute. Sorts any rip folder containing a .done marker.
-# TV discs: show, season and disc number come from the disc label. The first
-# episode number comes from the show's .ripsort season map (episodes per disc),
-# so discs can arrive in any order. Discs the map cannot place are parked
-# (.pending) and reported; run newseries to resolve.
+# TV discs: show, season and disc number come from the disc label. Each sorted
+# disc records its episode count in "Season NN/.discs"; the next disc numbers on
+# from the discs before it, and a disc whose predecessors are missing waits
+# (.pending) until they arrive. TOTAL_S<n> in the show's .ripsort caps the
+# numbering; DISCS_S<n> (optional) fixes the layout instead. Unknown shows are
+# parked and reported; run newseries to resolve.
 set -uo pipefail
 
 CONF="$HOME/.config/ripsort/series.conf"
@@ -28,6 +30,12 @@ parse_label() {
   DISC=$(printf '%s' "$up" | sed -nE 's/.*(DISC|DISK|D)_*0*([0-9]{1,2})(_|$).*/\2/p' | head -n1)
   SHOW_RAW=$(printf '%s' "$up" | sed -E 's/_*(SEASON|SERIES|S)_*[0-9]{1,2}.*$//; s/_*(DISC|DISK|D)_*[0-9]{1,2}.*$//; s/_+/ /g; s/^ +| +$//g')
   case "$SHOW_RAW" in DVD*VIDEO*|DVD|VIDEO|DISC*|UNTITLED*) SHOW_RAW="" ;; esac
+}
+
+# True if a label parses to the given show and season (runs in a subshell so
+# the caller's parsed values are untouched).
+label_is() {
+  ( parse_label "$1"; [ "$(norm "$SHOW_RAW")" = "$(norm "$2")" ] && [ "$SEASON" = "$3" ] )
 }
 
 # Find an existing show folder whose normalised name matches.
@@ -65,44 +73,74 @@ for marker in "$RIPS"/*/.done; do
       fi
       [ -z "$SEASON" ] && SEASON="${SEASON_DEFAULT:-}"
 
-      unset MIN_MINUTES MAX_MINUTES; unset "${!DISCS_S@}"
+      unset MIN_MINUTES MAX_MINUTES; unset "${!DISCS_S@}" "${!TOTAL_S@}"
       cfg="$TV/${show:-_}/.ripsort"
       # shellcheck source=/dev/null
       [ -n "$show" ] && [ -f "$cfg" ] && source "$cfg"
-      var="DISCS_S${SEASON:-0}"
-      read -ra counts <<< "${!var:-}"
-      helpmsg="Run: newseries \"${show:-Show Name}\" ${SEASON:-SEASON} \"EPS_PER_DISC\"  (e.g. \"6 7 7 5\") then it will sort."
+      min="${MIN_MINUTES:-18}"
+      max="${MAX_MINUTES:-$((min + 5))}"
+      mapvar="DISCS_S${SEASON:-0}"; totvar="TOTAL_S${SEASON:-0}"
+      read -ra counts <<< "${!mapvar:-}"
+      total="${!totvar:-}"
+      seasondir=$(printf "%s/%s/Season %02d" "$TV" "${show:-_}" "${SEASON:-0}")
+      record="$seasondir/.discs"
+      first=""; last=""; parked=""
 
-      if [ -z "$show" ] || [ -z "$SEASON" ] || [ -z "$DISC" ]; then
-        touch "$dir/.pending"
-        out="Unknown disc: $folder (show='${SHOW_RAW:-?}', season='${SEASON:-?}', disc='${DISC:-?}'). Label needs show, season and disc. $helpmsg"
-      elif [ ! -f "$cfg" ]; then
-        touch "$dir/.pending"
-        out="No .ripsort for $show. $helpmsg"
-      elif [ "${#counts[@]}" -eq 0 ]; then
-        touch "$dir/.pending"
-        out="No season $SEASON map for $show. $helpmsg"
-      elif [ "$DISC" -lt 1 ] || [ "$DISC" -gt "${#counts[@]}" ]; then
-        touch "$dir/.pending"
-        out="Disc $DISC is outside the season $SEASON map for $show (${#counts[@]} discs: ${counts[*]}). Fix the map with newseries, then it will sort."
+      if [ -z "$show" ]; then
+        parked="Unknown show: $folder (label show='${SHOW_RAW:-?}'). Run: newseries \"Show Name\" SEASON TOTAL  then it will sort."
+      elif [ -z "$SEASON" ] || [ -z "$DISC" ]; then
+        parked="Unreadable label: $folder (season='${SEASON:-?}', disc='${DISC:-?}'). Label needs S<n> and D<n>; or sort by hand with sorttv."
+      elif [ -f "$record" ] && grep -q "^$DISC " "$record"; then
+        out="Disc $DISC of $show series $SEASON was already sorted. $folder left in place."
+      elif [ "${#counts[@]}" -gt 0 ]; then
+        if [ "$DISC" -gt "${#counts[@]}" ]; then
+          parked="Disc $DISC is outside the series $SEASON disc map for $show (${counts[*]}). Fix .ripsort, then it will sort."
+        else
+          first=1; i=0
+          for c in "${counts[@]}"; do
+            [ "$i" -lt "$((DISC - 1))" ] && first=$((first + c))
+            i=$((i + 1))
+          done
+          last=$((first + counts[DISC - 1] - 1))
+        fi
       else
-        first=1; total=0; i=0
-        for c in "${counts[@]}"; do
-          total=$((total + c))
-          [ "$i" -lt "$((DISC - 1))" ] && first=$((first + c))
-          i=$((i + 1))
+        first=1; d=1
+        while [ "$d" -lt "$DISC" ]; do
+          n=$(grep "^$d " "$record" 2>/dev/null | awk '{print $2}')
+          if [ -z "$n" ]; then
+            parked="Disc $DISC of $show series $SEASON is waiting for disc $d to be ripped first."
+            break
+          fi
+          first=$((first + n)); d=$((d + 1))
         done
-        expected=${counts[$((DISC - 1))]}
-        min="${MIN_MINUTES:-18}"
-        max="${MAX_MINUTES:-$((min + 5))}"
-        out=$("$HOME/bin/sorttv" "$folder" "$show" "$SEASON" "$first" "$min" "$max" "$expected" 2>&1)
-        seasondir=$(printf "%s/%s/Season %02d" "$TV" "$show" "$SEASON")
-        have=$(ls "$seasondir"/*.mkv 2>/dev/null | wc -l)
-        out="$out
-Disc $DISC of ${#counts[@]} (episodes $first-$((first + expected - 1))). Season $SEASON: $have of $total on disk."
-        if [ "$DISC" -eq "${#counts[@]}" ] && [ "$have" -ne "$total" ]; then
+        last="$total"
+      fi
+
+      if [ -n "$parked" ]; then
+        touch "$dir/.pending"
+        out="$parked"
+      elif [ -n "$first" ]; then
+        out=$("$HOME/bin/sorttv" "$folder" "$show" "$SEASON" "$first" "$min" "$max" "$last" 2>&1)
+        found=$(printf '%s\n' "$out" | sed -n 's/^EPISODES=\([0-9]*\)$/\1/p' | tail -n1)
+        out=$(printf '%s\n' "$out" | grep -v '^EPISODES=')
+        if [ -n "$found" ]; then
+          mkdir -p "$seasondir"
+          printf '%s %s\n' "$DISC" "$found" >> "$record"
+          have=$(ls "$seasondir"/*.mkv 2>/dev/null | wc -l)
           out="$out
-WARNING: last disc sorted but the season count does not match."
+Disc $DISC: $found episodes from e$first. Series $SEASON: $have of ${total:-?} on disk."
+          [ "$found" -eq 0 ] && out="$out
+WARNING: no episode-length titles found on this disc."
+          # Re-queue any discs of this show and series that were waiting.
+          for p in "$RIPS"/*/.pending; do
+            [ -e "$p" ] || continue
+            if label_is "$(basename "$(dirname "$p")")" "$show" "$SEASON"; then
+              mv "$p" "$(dirname "$p")/.done"
+            fi
+          done
+        else
+          out="$out
+WARNING: sorttv did not complete; nothing recorded. $folder left in place."
         fi
       fi ;;
   esac
