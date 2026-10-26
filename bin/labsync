@@ -1,0 +1,28 @@
+#!/bin/bash
+set -uo pipefail
+
+LAB="git --git-dir=$HOME/.labrepo --work-tree=$HOME"
+LOG="$HOME/homelab/logs/labsync.log"
+T=$(sed -n 's/^TOPIC=//p' "$HOME/bin/ripwatch" | head -1 | tr -d "\"'")
+
+$LAB add -u
+
+if $LAB diff --cached --quiet; then
+  echo "$(date -Is) OK nothing to commit" >> "$LOG"
+  exit 0
+fi
+
+if [ -n "$T" ] && $LAB grep --cached -q -F "$T"; then
+  $LAB reset -q
+  echo "$(date -Is) BLOCKED topic found in tracked files" >> "$LOG"
+  exit 1
+fi
+
+$LAB commit -q -m "Auto: $(date +%F)"
+
+if $LAB push -q origin main; then
+  echo "$(date -Is) OK pushed" >> "$LOG"
+else
+  echo "$(date -Is) FAILED push" >> "$LOG"
+  exit 1
+fi
