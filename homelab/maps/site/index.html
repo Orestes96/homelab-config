@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>homelab-01 maps</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f3f4f6;
+    --panel: #ffffff;
+    --ink: #1a1f2b;
+    --ink-2: #4b5363;
+    --line: #c9cfd9;
+    --house: #c27a1a;
+    --lab: #1f7a8c;
+    --mgmt: #6b7280;
+    --iot: #7c5cbf;
+    --wan: #9a3b3b;
+    --soft-house: #fff3e0;
+    --soft-lab: #e3f3f6;
+    --soft-mgmt: #eef0f3;
+    --soft-iot: #efe9fb;
+    --soft-wan: #fbe9e9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b2130;
+      --panel: #232b3c;
+      --ink: #e6e9ef;
+      --ink-2: #a9b1c0;
+      --line: #3a4356;
+      --house: #e0a048;
+      --lab: #4fb3c5;
+      --mgmt: #9aa3b2;
+      --iot: #a78bfa;
+      --wan: #e07a7a;
+      --soft-house: #3a2e18;
+      --soft-lab: #173238;
+      --soft-mgmt: #2b3242;
+      --soft-iot: #2d2544;
+      --soft-wan: #3a2222;
+    }
+  }
+  html, body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.45 "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
+  main { max-width: 1240px; margin: 0 auto; padding: 24px 20px 48px; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+  h2 { font-size: 18px; font-weight: 600; margin: 32px 0 8px; }
+  p.lede { color: var(--ink-2); margin: 0 0 12px; max-width: 70ch; }
+  figure { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; }
+  svg { display: block; width: 100%; height: auto; font-family: inherit; }
+  .box { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+  .lane { stroke-width: 1.2; rx: 10; }
+  .t { fill: var(--ink); font-size: 14px; }
+  .t2 { fill: var(--ink-2); font-size: 12px; }
+  .h { fill: var(--ink); font-size: 15px; font-weight: 600; }
+  .edge { fill: none; stroke: var(--line); stroke-width: 1.6; }
+  .edge-house { fill: none; stroke: var(--house); stroke-width: 1.8; }
+  .edge-lab { fill: none; stroke: var(--lab); stroke-width: 1.8; }
+  .edge-iot { fill: none; stroke: var(--iot); stroke-width: 1.8; stroke-dasharray: 5 4; }
+  .edge-wan { fill: none; stroke: var(--wan); stroke-width: 1.8; }
+  .edge-dns { fill: none; stroke: var(--lab); stroke-width: 1.2; stroke-dasharray: 2 4; }
+  .key { fill: var(--ink-2); font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>homelab-01 maps</h1>
+  <p class="lede">Two views of the same network: how devices connect, and what the server runs.</p>
+
+  <h2>Network</h2>
+  <figure>
+  <svg id="network-map" viewBox="0 0 1200 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="net-title">
+    <title id="net-title">Network map: internet, ER605 router, four VLANs and the devices on them</title>
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="var(--line)"/>
+      </marker>
+    </defs>
+
+    <!-- Internet and router -->
+    <g id="internet">
+      <rect class="box" x="40" y="40" width="150" height="56" rx="28" style="stroke:var(--wan)"/>
+      <text class="h" x="115" y="63" text-anchor="middle">Internet</text>
+      <text class="t2" x="115" y="82" text-anchor="middle">PPPoE, no port forwards</text>
+    </g>
+    <g id="router">
+      <rect class="box" x="40" y="150" width="150" height="76" rx="8"/>
+      <text class="h" x="115" y="176" text-anchor="middle">ER605</text>
+      <text class="t2" x="115" y="195" text-anchor="middle">router, VLANs, DHCP</text>
+      <text class="t2" x="115" y="212" text-anchor="middle">192.168.x.1</text>
+    </g>
+    <path id="edge-wan-router" class="edge-wan" d="M115 96 V150" marker-end="url(#arrow)"/>
+    <g id="cloudflare-tunnel">
+      <path class="edge-wan" d="M925 180 V60 H190" style="stroke-dasharray:5 4" marker-end="url(#arrow)"/>
+      <text class="t2" x="200" y="52">Cloudflare tunnel, outbound only, from homelab-01</text>
+    </g>
+
+    <!-- Lanes -->
+    <g id="lane-house">
+      <rect class="lane" x="230" y="250" width="440" height="280" fill="var(--soft-house)" stroke="var(--house)"/>
+      <text class="h" x="246" y="276" fill="var(--house)">House</text>
+      <text class="t2" x="300" y="276">VLAN 1 · 192.168.0.0/24</text>
+    </g>
+    <g id="lane-lab">
+      <rect class="lane" x="690" y="130" width="470" height="400" fill="var(--soft-lab)" stroke="var(--lab)"/>
+      <text class="h" x="706" y="156" fill="var(--lab)">Server_Lab</text>
+      <text class="t2" x="798" y="156">VLAN 20 · 192.168.20.0/24</text>
+    </g>
+    <g id="lane-mgmt">
+      <rect class="lane" x="230" y="130" width="210" height="100" fill="var(--soft-mgmt)" stroke="var(--mgmt)"/>
+      <text class="h" x="246" y="156" fill="var(--mgmt)">Management</text>
+      <text class="t2" x="246" y="176">VLAN 30 · 192.168.30.0/24</text>
+      <text class="t2" x="246" y="196">reserved, nothing on it yet</text>
+    </g>
+    <g id="lane-iot">
+      <rect class="lane" x="460" y="130" width="210" height="100" fill="var(--soft-iot)" stroke="var(--iot)"/>
+      <text class="h" x="476" y="156" fill="var(--iot)">IoT</text>
+      <text class="t2" x="476" y="176">VLAN 40 · 192.168.40.0/24</text>
+      <text class="t2" x="476" y="196">garage Pi: Home Assistant</text>
+      <text class="t2" x="476" y="214">ACL: ping to Server_Lab only</text>
+    </g>
+
+    <!-- Router to lanes -->
+    <path id="edge-router-house" class="edge-house" d="M190 200 H210 V390 H230" marker-end="url(#arrow)"/>
+    <path id="edge-router-mgmt" class="edge" d="M190 180 H230" marker-end="url(#arrow)"/>
+    <path id="edge-router-iot" class="edge-iot" d="M190 165 H205 V118 H450 V165 H460" marker-end="url(#arrow)"/>
+    <path id="edge-router-lab" class="edge-lab" d="M190 190 H215 V240 H690" marker-end="url(#arrow)"/>
+
+    <!-- House devices -->
+    <g id="ap">
+      <rect class="box" x="250" y="300" width="180" height="70" rx="8" style="stroke:var(--house)"/>
+      <text class="h" x="340" y="326" text-anchor="middle">AXE7800</text>
+      <text class="t2" x="340" y="345" text-anchor="middle">Wi-Fi access point</text>
+      <text class="t2" x="340" y="361" text-anchor="middle">192.168.0.114</text>
+    </g>
+    <g id="pc">
+      <rect class="box" x="250" y="400" width="180" height="56" rx="8" style="stroke:var(--house)"/>
+      <text class="h" x="340" y="424" text-anchor="middle">Windows PC</text>
+      <text class="t2" x="340" y="443" text-anchor="middle">wired</text>
+    </g>
+    <g id="wifi-clients">
+      <rect class="box" x="470" y="300" width="180" height="156" rx="8" style="stroke:var(--house);stroke-dasharray:4 3"/>
+      <text class="h" x="560" y="326" text-anchor="middle">Wi-Fi clients</text>
+      <text class="t" x="560" y="352" text-anchor="middle">Fire Stick (Panasonic TV)</text>
+      <text class="t" x="560" y="374" text-anchor="middle">iPhone</text>
+      <text class="t" x="560" y="396" text-anchor="middle">laptops, guests</text>
+      <text class="t2" x="560" y="440" text-anchor="middle">DNS: 192.168.20.100</text>
+    </g>
+    <path id="edge-ap-clients" class="edge-house" d="M430 335 H470" marker-end="url(#arrow)"/>
+    <text class="t2" x="250" y="500">DS and 3DS join the Wi-Fi and are pointed at 192.168.20.101 for DNS</text>
+    <text class="t2" x="250" y="518">so Nintendo hostnames land on the WFC server at .102</text>
+
+    <!-- Server_Lab devices -->
+    <g id="homelab-01">
+      <rect class="box" x="710" y="180" width="430" height="150" rx="8" style="stroke:var(--lab)"/>
+      <text class="h" x="726" y="206">homelab-01</text>
+      <text class="t2" x="840" y="206">OptiPlex 7050 · Ubuntu 26.04 · Docker</text>
+      <text class="t" x="726" y="232">192.168.20.100</text>
+      <text class="t2" x="860" y="232">all web services, DNS (AdGuard), Caddy on :80</text>
+      <text class="t" x="726" y="258">192.168.20.101</text>
+      <text class="t2" x="860" y="258">dnsmasq for DS clients (macvlan)</text>
+      <text class="t" x="726" y="284">192.168.20.102</text>
+      <text class="t2" x="860" y="284">WFC legacy nginx :80 :443 (macvlan)</text>
+      <text class="t2" x="726" y="312">/dev/sr0 DVD drive · /srv/media on the 232 GB SSD, 4 TB disk to come</text>
+    </g>
+    <g id="switch-future">
+      <rect class="box" x="710" y="360" width="200" height="56" rx="8" style="stroke:var(--lab);stroke-dasharray:4 3"/>
+      <text class="h" x="810" y="384" text-anchor="middle">Unmanaged switch</text>
+      <text class="t2" x="810" y="403" text-anchor="middle">planned, for a second server</text>
+    </g>
+    <g id="dns-note">
+      <rect class="box" x="930" y="360" width="210" height="150" rx="8" style="stroke:var(--lab)"/>
+      <text class="h" x="946" y="386">Name resolution</text>
+      <text class="t2" x="946" y="408">AdGuard on .20.100:53</text>
+      <text class="t2" x="946" y="426">*.home.arpa → 192.168.20.100</text>
+      <text class="t2" x="946" y="444">handed out by ER605 DHCP</text>
+      <text class="t2" x="946" y="462">on House and Server_Lab</text>
+      <text class="t2" x="946" y="490">IoT still on ISP resolvers</text>
+    </g>
+
+    <!-- DNS flows -->
+    <path id="edge-dns-house" class="edge-dns" d="M650 470 H930" marker-end="url(#arrow)"/>
+
+    <!-- Key -->
+    <g id="key">
+      <line class="edge-house" x1="40" y1="300" x2="70" y2="300"/><text class="key" x="78" y="304">House traffic</text>
+      <line class="edge-lab" x1="40" y1="324" x2="70" y2="324"/><text class="key" x="78" y="328">Server_Lab traffic</text>
+      <line class="edge-iot" x1="40" y1="348" x2="70" y2="348"/><text class="key" x="78" y="352">IoT, restricted</text>
+      <line class="edge-dns" x1="40" y1="372" x2="70" y2="372"/><text class="key" x="78" y="376">DNS lookups</text>
+      <line class="edge-wan" x1="40" y1="396" x2="70" y2="396"/><text class="key" x="78" y="400">Internet</text>
+      <text class="key" x="40" y="430">Dashed boxes are planned</text>
+      <text class="key" x="40" y="448">or a group of devices.</text>
+    </g>
+  </svg>
+  </figure>
+
+  <h2>Services on homelab-01</h2>
+  <figure>
+  <svg id="services-map" viewBox="0 0 1200 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="svc-title">
+    <title id="svc-title">Services map: Caddy routes each home.arpa name to a container port; non-web services and the ripping pipeline shown alongside</title>
+
+    <!-- Front door -->
+    <g id="caddy">
+      <rect class="box" x="40" y="40" width="220" height="100" rx="8" style="stroke:var(--lab)"/>
+      <text class="h" x="56" y="66">Caddy</text>
+      <text class="t2" x="56" y="86">reverse proxy on :80</text>
+      <text class="t2" x="56" y="104">routes by hostname</text>
+      <text class="t2" x="56" y="122">also :8443 for Vaultwarden</text>
+    </g>
+    <text class="t2" x="40" y="170">A browser asks for a name,</text>
+    <text class="t2" x="40" y="188">AdGuard answers 192.168.20.100,</text>
+    <text class="t2" x="40" y="206">Caddy sends it to the right port.</text>
+
+    <!-- Web services table -->
+    <g id="web-services">
+      <rect class="box" x="300" y="40" width="560" height="420" rx="8"/>
+      <text class="h" x="316" y="66">Web services, by name</text>
+      <text class="t2" x="316" y="92">name</text>
+      <text class="t2" x="520" y="92">what it is</text>
+      <text class="t2" x="780" y="92">port</text>
+      <line class="edge" x1="316" y1="100" x2="844" y2="100"/>
+
+      <g id="svc-home"><text class="t" x="316" y="124">home.arpa</text><text class="t" x="520" y="124">Homepage dashboard</text><text class="t" x="780" y="124">3010</text></g>
+      <g id="svc-jellyfin"><text class="t" x="316" y="150">jellyfin</text><text class="t" x="520" y="150">Jellyfin media server</text><text class="t" x="780" y="150">8096</text></g>
+      <g id="svc-tv"><text class="t" x="316" y="176">tv</text><text class="t" x="520" y="176">ErsatzTV channel scheduler</text><text class="t" x="780" y="176">8409</text></g>
+      <g id="svc-plex"><text class="t" x="316" y="202">plex</text><text class="t" x="520" y="202">Plex (being retired)</text><text class="t" x="780" y="202">32400</text></g>
+      <g id="svc-makemkv"><text class="t" x="316" y="228">makemkv</text><text class="t" x="520" y="228">MakeMKV disc ripper</text><text class="t" x="780" y="228">5800</text></g>
+      <g id="svc-books"><text class="t" x="316" y="254">books</text><text class="t" x="520" y="254">Calibre-Web Automated</text><text class="t" x="780" y="254">8083</text></g>
+      <g id="svc-adguard"><text class="t" x="316" y="280">adguard</text><text class="t" x="520" y="280">AdGuard Home admin</text><text class="t" x="780" y="280">3000</text></g>
+      <g id="svc-uc"><text class="t" x="316" y="306">uc</text><text class="t" x="520" y="306">University Challenge trainer</text><text class="t" x="780" y="306">8000</text></g>
+      <g id="svc-quiz"><text class="t" x="316" y="332">quiz / quiz-staging</text><text class="t" x="520" y="332">Quiz platform</text><text class="t" x="780" y="332">3005 / 3004</text></g>
+      <g id="svc-assets"><text class="t" x="316" y="358">assets / assets-staging</text><text class="t" x="520" y="358">Network asset app</text><text class="t" x="780" y="358">3002 / 3001</text></g>
+      <g id="svc-maps"><text class="t" x="316" y="384">maps</text><text class="t" x="520" y="384">this page</text><text class="t" x="780" y="384">3011</text></g>
+      <g id="svc-vault"><text class="t" x="316" y="420">192.168.20.100:8443</text><text class="t" x="520" y="420">Vaultwarden, HTTPS, self-signed</text><text class="t" x="780" y="420">8080</text></g>
+      <text class="t2" x="316" y="446">All names end in .home.arpa</text>
+    </g>
+    <path id="edge-caddy-web" class="edge-lab" d="M260 90 H300" marker-end="url(#arrow)"/>
+
+    <!-- Non-web -->
+    <g id="non-web">
+      <rect class="box" x="890" y="40" width="270" height="260" rx="8"/>
+      <text class="h" x="906" y="66">Not behind Caddy</text>
+      <g id="svc-dns"><text class="t" x="906" y="96">AdGuard DNS</text><text class="t2" x="906" y="114">.100:53, LAN-wide</text></g>
+      <g id="svc-ollama"><text class="t" x="906" y="142">Ollama</text><text class="t2" x="906" y="160">127.0.0.1:11434, local only</text></g>
+      <g id="svc-wfc"><text class="t" x="906" y="188">WFC server (AltWFC)</text><text class="t2" x="906" y="206">nginx .102:80/443, dnsmasq .101:53</text><text class="t2" x="906" y="224">DS and 3DS only</text></g>
+      <g id="svc-runners"><text class="t" x="906" y="252">GitHub Actions runners</text><text class="t2" x="906" y="270">two, self-hosted CI</text></g>
+      <g id="svc-cloudflared"><text class="t" x="906" y="290">cloudflared tunnel</text></g>
+    </g>
+
+    <!-- Media pipeline -->
+    <g id="pipeline">
+      <rect class="box" x="40" y="490" width="1120" height="200" rx="8" style="stroke:var(--house)"/>
+      <text class="h" x="56" y="516">Disc to screen</text>
+
+      <g id="step-disc"><rect class="box" x="56" y="540" width="150" height="60" rx="6"/><text class="t" x="131" y="564" text-anchor="middle">DVD in drive</text><text class="t2" x="131" y="582" text-anchor="middle">/dev/sr0</text></g>
+      <path class="edge" d="M206 570 H240" marker-end="url(#arrow)"/>
+      <g id="step-makemkv"><rect class="box" x="240" y="540" width="150" height="60" rx="6"/><text class="t" x="315" y="564" text-anchor="middle">MakeMKV</text><text class="t2" x="315" y="582" text-anchor="middle">auto-rip, eject</text></g>
+      <path class="edge" d="M390 570 H424" marker-end="url(#arrow)"/>
+      <g id="step-ripwatch"><rect class="box" x="424" y="540" width="170" height="60" rx="6"/><text class="t" x="509" y="564" text-anchor="middle">ripwatch (cron)</text><text class="t2" x="509" y="582" text-anchor="middle">label → show, season</text></g>
+      <path class="edge" d="M594 570 H628" marker-end="url(#arrow)"/>
+      <g id="step-media"><rect class="box" x="628" y="540" width="170" height="60" rx="6"/><text class="t" x="713" y="564" text-anchor="middle">/srv/media/rips</text><text class="t2" x="713" y="582" text-anchor="middle">tv, movies, extras</text></g>
+      <path class="edge" d="M798 570 H832" marker-end="url(#arrow)"/>
+      <g id="step-jellyfin"><rect class="box" x="832" y="540" width="150" height="60" rx="6"/><text class="t" x="907" y="564" text-anchor="middle">Jellyfin</text><text class="t2" x="907" y="582" text-anchor="middle">library, Live TV</text></g>
+      <path class="edge" d="M982 570 H1016" marker-end="url(#arrow)"/>
+      <g id="step-firestick"><rect class="box" x="1016" y="540" width="130" height="60" rx="6"/><text class="t" x="1081" y="564" text-anchor="middle">Fire Stick</text><text class="t2" x="1081" y="582" text-anchor="middle">Jellyfin app</text></g>
+
+      <g id="step-ersatz"><rect class="box" x="628" y="620" width="170" height="52" rx="6" style="stroke:var(--house)"/><text class="t" x="713" y="641" text-anchor="middle">ErsatzTV</text><text class="t2" x="713" y="659" text-anchor="middle">channels from the library</text></g>
+      <path class="edge" d="M713 600 V620" marker-end="url(#arrow)"/>
+      <path class="edge" d="M798 646 H907 V600" marker-end="url(#arrow)"/>
+      <g id="step-ntfy"><text class="t2" x="56" y="636">Each disc ends with a phone notification showing the sort result.</text><text class="t2" x="56" y="654">An unknown show is parked until newseries names it.</text></g>
+    </g>
+  </svg>
+  </figure>
+</main>
+</body>
+</html>

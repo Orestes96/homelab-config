@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Server down runbook</title>
+<style>
+:root{--bg:#ffffff;--fg:#1a1a1a;--mute:#555b66;--card:#f4f5f7;--line:#d5d8de;--code:#eceef2;--accent:#0b5cad}
+@media (prefers-color-scheme:dark){:root{--bg:#14161a;--fg:#e8e8e8;--mute:#a0a6b0;--card:#1d2026;--line:#333842;--code:#0e1013;--accent:#6cb0f5}}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+main{max-width:46rem;margin:0 auto;padding:1.5rem 1rem 4rem}
+h1{font-size:1.7rem;margin:0 0 .25rem}
+h2{font-size:1.25rem;margin:2.2rem 0 .6rem;border-top:1px solid var(--line);padding-top:1.2rem}
+p,li{margin:.4rem 0}
+.mute{color:var(--mute)}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.6rem 1rem;margin:.8rem 0}
+pre{background:var(--code);border:1px solid var(--line);border-radius:6px;padding:.6rem .8rem;overflow-x:auto;font:15px/1.4 ui-monospace,Consolas,monospace;margin:.5rem 0}
+code{font:15px ui-monospace,Consolas,monospace;background:var(--code);padding:.05rem .3rem;border-radius:4px}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:.8rem}
+@media (max-width:40rem){.cols{grid-template-columns:1fr}}
+a{color:var(--accent)}
+</style>
+</head>
+<body>
+<main>
+<h1>Server down runbook</h1>
+<p class="mute">homelab-01 at 192.168.20.100. Written 26 October 2026, after the Docker address pool outage. A copy lives in the private GitHub repo homelab-config.</p>
+
+<h2>What stops and what keeps working</h2>
+<div class="cols">
+<div class="box">
+<strong>Stops</strong>
+<ul>
+<li>Every home.arpa service: Plex, Jellyfin, ErsatzTV, books, quiz, status, assets, homepage, maps</li>
+<li>The server's AdGuard. House devices fall over to the Pi, so lookups feel slow, not broken</li>
+<li>Vaultwarden. Password apps use their cached copy; the web vault is offline</li>
+<li>The Cloudflare tunnel and anything public through it</li>
+<li>Uptime Kuma, Diun, ripping, GitHub runners, nightly backups</li>
+<li>DNS on the Server_Lab VLAN, which has no fallback</li>
+</ul>
+</div>
+<div class="box">
+<strong>Keeps working</strong>
+<ul>
+<li>Internet and the router</li>
+<li>The Pi's AdGuard at 192.168.40.100 (admin at port 8053)</li>
+<li>Home Assistant, Zigbee lights and sensors, Hive heating</li>
+<li>Home Assistant pings the server and alerts your phone when it is down</li>
+</ul>
+</div>
+</div>
+<p class="mute">There is no UPS yet, so a power cut stops the server abruptly. BIOS AC Recovery is set to Power On, so it restarts by itself when power returns.</p>
+
+<h2>First five minutes</h2>
+<p>From the PC, is the server alive? Replies mean it is up and the problem is a service or the network. No replies means go to the console.</p>
+<pre>ping -n 3 192.168.20.100</pre>
+<p>Is the router routing to the server's VLAN? Replies here mean the router side is fine.</p>
+<pre>ping -n 3 192.168.20.1</pre>
+<p>On the server console, what is running? Anything that should be up but is missing is the lead.</p>
+<pre>docker ps --format '{{.Names}}  {{.Status}}'</pre>
+<p>What has stopped? Two old test containers named sad_williams and tender_panini were removed on the day this was written, so any entry now is new.</p>
+<pre>docker ps -a --filter status=exited --format '{{.Names}}  {{.Status}}'</pre>
+
+<h2>Known cause: a Docker bridge inside 192.168.x</h2>
+<p>On 26 October 2026 Docker ran out of its default address range and put a bridge inside 192.168.0.0/20. The server then sent replies for the House VLAN into that bridge, and the house lost DNS. The server was running but unreachable from the House VLAN. The pool is now set in /etc/docker/daemon.json, so it should not recur. To check for it:</p>
+<pre>docker network inspect $(docker network ls -q) --format '{{.Name}} {{range .IPAM.Config}}{{.Subnet}}{{end}}' | grep 192.168</pre>
+<p>Expect one line only, altwfc-mystery-gift_lan on 192.168.20.0/24. That one is intentional. If any other network shows, go to that project's folder under ~/homelab and run these two commands.</p>
+<pre>docker compose down</pre>
+<pre>docker compose up -d</pre>
+
+<h2>If DNS is dead everywhere</h2>
+<p>If both AdGuards fail, the fastest way to get the house online is to blank the DHCP DNS on the router. In the ER605 at 192.168.0.1, go to Network, then LAN, edit House, and clear Primary and Secondary DNS. A blank field saves fine. Then renew the lease on each device. On the PC:</p>
+<pre>ipconfig /renew</pre>
+<p>To fix only the PC, in a Command Prompt run as administrator, set a fixed resolver:</p>
+<pre>netsh interface ip set dns "Ethernet 3" static 1.1.1.1</pre>
+<p>And put it back to automatic afterwards:</p>
+<pre>netsh interface ip set dns "Ethernet 3" dhcp</pre>
+<p>When the server is healthy again, set the House DHCP DNS back to 192.168.20.100 as primary and 192.168.40.100 as secondary.</p>
+
+<h2>After a power cut</h2>
+<p>The server should power on by itself and every container should start with no login. The login prompt on the console is normal and can be ignored. Give it three minutes, then check:</p>
+<pre>docker ps --format '{{.Names}}  {{.Status}}'</pre>
+<p>If the server has no network after boot, the router or access point was probably still starting. Reboot the server once they are up.</p>
+<pre>sudo systemctl reboot</pre>
+
+<h2>Where the backups are</h2>
+<ul>
+<li>On the server: ~/backups/lab, one archive each night at 03:30, last 14 kept</li>
+<li>On the PC: the labbackups folder in your user profile, pulled at 09:00 and at logon</li>
+<li>On GitHub: the private repo homelab-config, with compose files, scripts and the Caddyfile, synced at 04:00</li>
+</ul>
+<p>The archive includes consistent snapshots of the Vaultwarden and quiz databases. To see what an archive holds, run this on the server:</p>
+<pre>tar -tzf "$(ls -t ~/backups/lab/*.tar.gz | head -1)" | head -40</pre>
+<p>Not in git, so recreate them by hand if the server is rebuilt: the two ntfy topic files in the home folder (re-add the topic names from your phone's ntfy subscriptions), and the Diun settings file in ~/homelab/diun. The app data folders are in the nightly archive, not in git.</p>
+
+<h2>Useful addresses</h2>
+<ul>
+<li>Router: 192.168.0.1</li>
+<li>Access point: 192.168.0.114</li>
+<li>Pi AdGuard admin: http://192.168.40.100:8053</li>
+<li>Server AdGuard admin: http://adguard.home.arpa</li>
+<li>Uptime Kuma: http://status.home.arpa</li>
+</ul>
+</main>
+</body>
+</html>
