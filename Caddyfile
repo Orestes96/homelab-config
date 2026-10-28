@@ -71,3 +71,25 @@ http://assets-staging.home.arpa {
         header_up X-Forwarded-Proto https
     }
 }
+
+# arr stack (all bound to 127.0.0.1, Caddy is the only way in)
+http://prowlarr.home.arpa {
+    reverse_proxy localhost:9696
+}
+
+http://sonarr.home.arpa {
+    reverse_proxy localhost:8989
+}
+
+http://radarr.home.arpa {
+    reverse_proxy localhost:7878
+}
+
+http://requests.home.arpa {
+    reverse_proxy localhost:5055
+}
+
+http://qbt.home.arpa {
+    reverse_proxy localhost:8081 {
+    }
+}
