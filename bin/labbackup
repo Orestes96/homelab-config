@@ -4,7 +4,7 @@ umask 077
 
 DEST=/home/elliot/backups/lab
 LOG=/home/elliot/homelab/logs/labbackup.log
-KEEP_DAYS=14
+KEEP_DAYS=3
 STAMP=$(date +%F_%H%M)
 OUT="$DEST/labbackup-$STAMP.tar.gz"
 VW=/home/elliot/vaultwarden-data
