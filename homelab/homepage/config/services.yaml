@@ -1,0 +1,101 @@
+- Media:
+    - Jellyfin:
+        href: http://jellyfin.home.arpa
+        description: Films, TV, live channels
+        siteMonitor: http://jellyfin.home.arpa/health
+    - ErsatzTV:
+        href: http://tv.home.arpa
+        description: Channel scheduler
+        siteMonitor: http://tv.home.arpa
+    - Plex:
+        href: http://plex.home.arpa
+        description: Films, TV, extras
+        siteMonitor: http://plex.home.arpa/identity
+    - MakeMKV:
+        href: http://makemkv.home.arpa
+        description: Disc ripper
+        siteMonitor: http://makemkv.home.arpa
+    - Books:
+        href: http://books.home.arpa
+        description: Calibre-Web Automated
+        siteMonitor: http://books.home.arpa
+
+- Downloads:
+    - Requests:
+        href: http://requests.home.arpa
+        description: Seerr, ask for films and TV
+        siteMonitor: http://requests.home.arpa
+    - LazyLibrarian:
+        href: http://lazylibrarian.home.arpa
+        description: Ask for public-domain books
+        siteMonitor: http://lazylibrarian.home.arpa
+    - Radarr:
+        href: http://radarr.home.arpa
+        description: Films
+        siteMonitor: http://radarr.home.arpa/ping
+    - Sonarr:
+        href: http://sonarr.home.arpa
+        description: TV
+        siteMonitor: http://sonarr.home.arpa/ping
+    - Prowlarr:
+        href: http://prowlarr.home.arpa
+        description: Indexers
+        siteMonitor: http://prowlarr.home.arpa/ping
+    - qBittorrent:
+        href: http://qbt.home.arpa
+        description: Download client (via VPN)
+        siteMonitor: http://qbt.home.arpa
+
+- Apps:
+    - Quiz platform:
+        href: http://quiz.home.arpa
+        description: Production
+        siteMonitor: http://quiz.home.arpa
+    - Quiz platform (staging):
+        href: http://quiz-staging.home.arpa
+        description: Staging
+        siteMonitor: http://quiz-staging.home.arpa
+    - Network assets:
+        href: http://assets.home.arpa
+        description: Production
+        siteMonitor: http://assets.home.arpa
+    - Network assets (staging):
+        href: http://assets-staging.home.arpa
+        description: Staging
+        siteMonitor: http://assets-staging.home.arpa
+    - UC trainer:
+        href: http://uc.home.arpa
+        description: University Challenge trainer
+        siteMonitor: http://uc.home.arpa
+
+- Admin:
+    - Uptime Kuma:
+        href: http://status.home.arpa
+        description: Monitoring and alerts
+        siteMonitor: http://status.home.arpa
+    - AdGuard Home:
+        href: http://adguard.home.arpa
+        description: DNS and ad blocking
+        siteMonitor: http://adguard.home.arpa
+    - Vaultwarden:
+        href: https://192.168.20.100:8443
+        description: Passwords
+    - Router:
+        href: http://192.168.0.1
+        description: ER605
+        siteMonitor: http://192.168.0.1
+    - Access point:
+        href: http://192.168.0.114
+        description: AXE7800
+        ping: 192.168.0.114
+
+- Maps:
+    - Network and services:
+        href: http://maps.home.arpa
+        description: How it all connects
+        siteMonitor: http://maps.home.arpa
+
+    - Server down runbook:
+        href: http://maps.home.arpa/runbook.html
+        description: What to do when the server is down
+        siteMonitor: http://maps.home.arpa/runbook.html

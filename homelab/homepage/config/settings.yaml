@@ -1,0 +1,15 @@
+title: homelab-01
+theme: dark
+color: slate
+headerStyle: clean
+hideVersion: true
+layout:
+  Media:
+    style: row
+    columns: 3
+  Apps:
+    style: row
+    columns: 3
+  Admin:
+    style: row
+    columns: 3
