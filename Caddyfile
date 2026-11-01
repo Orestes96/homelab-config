@@ -93,3 +93,7 @@ http://qbt.home.arpa {
     reverse_proxy localhost:8081 {
     }
 }
+
+http://lazylibrarian.home.arpa {
+    reverse_proxy localhost:5299
+}

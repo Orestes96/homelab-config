@@ -1,24 +1,16 @@
 #!/bin/bash
-LOG="/home/elliot/homelab/logs/quiz-backup.log"
-MAX_AGE_HOURS=30
+# check-quiz-backup-health: exits 1 if the restic repository in B2 can't
+# be reached or fails an integrity check. Freshness is covered by the
+# quiz-backup job's own mark-success alert.
+source /home/elliot/.config/restic/quiz.env
 
-if [ ! -f "$LOG" ]; then
-  logger -t quiz-backup-health "WARNING: backup log missing entirely"
+fail() {
+  logger -t quiz-backup-health "WARNING: $1"
+  echo "WARNING: $1" >&2
   exit 1
-fi
+}
 
-LAST_SUCCESS_LINE=$(grep -E "committed and pushed|no changes, skipping commit" "$LOG" | tail -1)
+restic check --read-data-subset=10% --quiet \
+  || fail "restic check failed for the quiz-platform repository"
 
-if [ -z "$LAST_SUCCESS_LINE" ]; then
-  logger -t quiz-backup-health "WARNING: quiz-platform backup has never succeeded"
-  exit 1
-fi
-
-LAST_SUCCESS_TIME=$(echo "$LAST_SUCCESS_LINE" | grep -oE '^[0-9T:-]+Z')
-LAST_SUCCESS_EPOCH=$(date -d "$LAST_SUCCESS_TIME" +%s)
-NOW_EPOCH=$(date +%s)
-AGE_HOURS=$(( (NOW_EPOCH - LAST_SUCCESS_EPOCH) / 3600 ))
-
-if [ "$AGE_HOURS" -gt "$MAX_AGE_HOURS" ]; then
-  logger -t quiz-backup-health "WARNING: quiz-platform backup stale, last success $AGE_HOURS hours ago"
-fi
+exit 0
