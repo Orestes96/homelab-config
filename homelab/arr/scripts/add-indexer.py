@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """add-indexer: add a public indexer to Prowlarr and push it to every app
-that should use it. Applies the "Search only" sync profile, tests the
-indexer through Prowlarr before saving, then runs sync-indexer.sh to check
-Sonarr and Radarr and add it to LazyLibrarian if it carries books.
+that should use it. Applies the "Search only" sync profile and any tags you
+ask for, tests the indexer through Prowlarr before saving, then runs
+sync-indexer.sh to check Sonarr and Radarr and add it to LazyLibrarian if
+it carries books.
+
+Tags matter because an app with a tag in Prowlarr only receives indexers
+carrying that same tag. Use --tags to see which apps use which tags.
 """
 import difflib
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.error
@@ -27,12 +32,17 @@ BLOCKED = {
 }
 
 USAGE = f"""How to use it:
-  {SELF} "Indexer name"        add an indexer
-  {SELF} "Indexer name" 30     add it, allowing LazyLibrarian 30 searches a day (default 20)
-  {SELF} --list word           find indexer names containing a word
-  {SELF} --help                show this help
+  {SELF} "Indexer name"                     add an indexer
+  {SELF} "Indexer name" 30                  ...allowing LazyLibrarian 30 searches a day (default 20)
+  {SELF} "Indexer name" --tag movies        ...with the existing Prowlarr tag "movies" (repeat for more)
+  {SELF} "Indexer name" --create-tag books  ...creating the tag "books" first if it doesn't exist
+  {SELF} --list word                        find indexer names containing a word
+  {SELF} --tags                             show Prowlarr's tags and which apps use them
+  {SELF} --help                             show this help
 
-Always put the indexer name in quotes, as most names contain spaces or brackets."""
+Always put the indexer name in quotes, as most names contain spaces or brackets.
+Running it again on an indexer that's already added adds any tags you give
+and retries the app sync, without adding the indexer twice."""
 
 
 def fail(problem, fix, code=1):
@@ -83,6 +93,104 @@ def prowlarr_says(err):
         return f"HTTP error {err.code}"
 
 
+def parse(args):
+    """Split arguments into the name/limit, --tag names and --create-tag names."""
+    positional, tags, create = [], [], []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ("--tag", "--create-tag"):
+            if i + 1 >= len(args) or args[i + 1].startswith("-"):
+                fail(f"'{a}' needs a tag name after it.",
+                     f'For example:\n  {SELF} "Indexer name" {a} movies')
+            (tags if a == "--tag" else create).append(args[i + 1].strip().lower())
+            i += 2
+            continue
+        if a.startswith("-"):
+            fail(f"'{a}' isn't an option this script knows.", "\n" + USAGE)
+        positional.append(a)
+        i += 1
+    return positional, tags, create
+
+
+def check_tags(tags, create):
+    """Return ids of existing tags, and labels still to create. Changes nothing."""
+    by_label = {t["label"].lower(): t["id"] for t in api("GET", "tag")}
+    ids = []
+    for label in tags:
+        if label not in by_label:
+            close = difflib.get_close_matches(label, list(by_label), n=3, cutoff=0.5)
+            if close:
+                fix = (f"Did you mean: {', '.join(close)}? Use one of those with --tag.\n"
+                       f"Or, if '{label}' is a new tag you want, use --create-tag {label} instead.")
+            elif by_label:
+                fix = (f"The existing tags are: {', '.join(sorted(by_label))}.\n"
+                       f"Or, if '{label}' is a new tag you want, use --create-tag {label} instead.")
+            else:
+                fix = f"Prowlarr has no tags yet. Create this one with --create-tag {label} instead."
+            fail(f"Prowlarr has no tag called '{label}'.", fix)
+        ids.append(by_label[label])
+    to_create = []
+    for label in create:
+        if label in by_label:
+            ids.append(by_label[label])
+        elif not re.fullmatch(r"[a-z0-9-]+", label):
+            fail(f"'{label}' can't be used as a tag name.",
+                 "Use only lowercase letters, numbers and hyphens, for example: public-domain")
+        else:
+            to_create.append(label)
+    return ids, to_create
+
+
+def create_tags(labels):
+    ids = []
+    for label in labels:
+        try:
+            ids.append(api("POST", "tag", {"label": label})["id"])
+        except urllib.error.HTTPError as e:
+            fail(f"Prowlarr wouldn't create the tag '{label}'. Prowlarr said: {prowlarr_says(e)}",
+                 "See Prowlarr's full error with:\n  docker logs --tail 30 prowlarr")
+        print(f"Created the tag '{label}' in Prowlarr.")
+    return ids
+
+
+def show_tags():
+    tags = api("GET", "tag")
+    apps = api("GET", "applications")
+    if not tags:
+        print("Prowlarr has no tags, so every app receives every indexer.")
+        return 0
+    print("Tags in Prowlarr, and the apps that use them:")
+    for t in sorted(tags, key=lambda t: t["label"]):
+        users = [a["name"] for a in apps if t["id"] in a.get("tags", [])]
+        print(f"  {t['label']}: {', '.join(users) or 'no apps'}")
+    untagged = [a["name"] for a in apps if not a.get("tags")]
+    if untagged:
+        print(f"Apps with no tags, which receive every indexer: {', '.join(untagged)}")
+    tagged = [a for a in apps if a.get("tags")]
+    if tagged:
+        print("An app with tags only receives indexers carrying at least one of the same tags.")
+    return 0
+
+
+def explain_missing(name):
+    """After a failed sync, point out any app whose tags this indexer doesn't share."""
+    ix = next((i for i in api("GET", "indexer") if i["name"] == name), None)
+    if ix is None:
+        return
+    labels = {t["id"]: t["label"] for t in api("GET", "tag")}
+    ix_tags = set(ix.get("tags", []))
+    for a in api("GET", "applications"):
+        app_tags = set(a.get("tags", []))
+        if app_tags and not app_tags & ix_tags:
+            wanted = ", ".join(labels.get(t, str(t)) for t in sorted(app_tags))
+            first = labels.get(sorted(app_tags)[0], "")
+            print(f"\nLikely cause for {a['name']}: it only receives indexers tagged '{wanted}', "
+                  f"and '{name}' has {'no tags' if not ix_tags else 'none of those'}.\n"
+                  f"How to fix it: add the tag by running this again:\n"
+                  f'  {SELF} "{name}" --tag {first}', file=sys.stderr)
+
+
 def main():
     args = sys.argv[1:]
 
@@ -91,14 +199,15 @@ def main():
     if args[0] in ("-h", "--help", "help"):
         print(__doc__ + "\n" + USAGE)
         return 0
-    if args[0].startswith("-") and args[0] != "--list":
-        fail(f"'{args[0]}' isn't an option this script knows.", "\n" + USAGE)
 
     global KEY
     KEY = api_key()
-    schema = api("GET", "indexer/schema")
+
+    if args[0] == "--tags":
+        return show_tags()
 
     if args[0] == "--list":
+        schema = api("GET", "indexer/schema")
         word = " ".join(args[1:]).lower()
         hits = sorted((s for s in schema if word in s["name"].lower()),
                       key=lambda s: s["name"].lower())
@@ -110,23 +219,20 @@ def main():
             print(f"{s['name']}  [{s.get('privacy', 'unknown')}]{note}")
         return 0
 
-    # Spot a name that wasn't quoted, which arrives as several separate words
-    if len(args) > 2:
-        words = args[:-1] if args[-1].isdigit() else args
-        fail(f"Got {len(args)} separate words, so the name probably wasn't in quotes.",
+    positional, tags, create = parse(args)
+
+    if not positional:
+        fail("No indexer name given, only tag options.", "\n" + USAGE)
+    if len(positional) > 2 or (len(positional) == 2 and not positional[1].isdigit()):
+        words = positional[:-1] if positional[-1].isdigit() else positional
+        fail(f"Got {len(positional)} separate words for the name, so it probably wasn't in quotes.",
              f'Put the whole name in quotes, like this:\n  {SELF} "{" ".join(words)}"')
 
-    name = args[0].strip()
-    limit = "20"
-    if len(args) == 2:
-        if not args[1].isdigit():
-            fail(f"'{args[1]}' isn't a number, so it can't be the daily search limit. "
-                 "The name probably wasn't in quotes.",
-                 f'Put the whole name in quotes, like this:\n  {SELF} "{args[0]} {args[1]}"')
-        limit = args[1]
-        if not 1 <= int(limit) <= 500:
-            fail(f"A daily limit of {limit} won't work.",
-                 "Use a number from 1 to 500. 20 suits most free archives.")
+    name = positional[0].strip()
+    limit = positional[1] if len(positional) == 2 else "20"
+    if not 1 <= int(limit) <= 500:
+        fail(f"A daily limit of {limit} won't work.",
+             "Use a number from 1 to 500. 20 suits most free archives.")
     if not name:
         fail("The indexer name is empty.", "\n" + USAGE)
 
@@ -134,6 +240,7 @@ def main():
         reason, instead = BLOCKED[name.lower()]
         fail(f"'{name}' shouldn't be used: {reason}.", f"Don't add this one. Instead, {instead}.")
 
+    schema = api("GET", "indexer/schema")
     ix = next((s for s in schema if s["name"].lower() == name.lower()), None)
     if ix is None:
         names = [s["name"] for s in schema]
@@ -147,18 +254,36 @@ def main():
         else:
             fix = f"Search the catalogue with one word from the name:\n  {SELF} --list {name.split()[0]}"
         fail(f"There's no indexer called '{name}' in Prowlarr's catalogue.", fix)
-
     real_name = ix["name"]
 
-    if any(i["name"] == real_name for i in api("GET", "indexer")):
-        print(f"'{real_name}' is already in Prowlarr, moving on to the app sync.")
+    # Check every tag name before changing anything
+    tag_ids, to_create = check_tags(tags, create)
+
+    existing = next((i for i in api("GET", "indexer") if i["name"] == real_name), None)
+    if existing:
+        print(f"'{real_name}' is already in Prowlarr.")
+        if tag_ids or to_create:
+            tag_ids += create_tags(to_create)
+            merged = sorted(set(existing.get("tags", [])) | set(tag_ids))
+            if merged != sorted(existing.get("tags", [])):
+                existing["tags"] = merged
+                try:
+                    api("PUT", f"indexer/{existing['id']}", existing)
+                except urllib.error.HTTPError as e:
+                    fail(f"Prowlarr wouldn't save the new tags. Prowlarr said: {prowlarr_says(e)}",
+                         "Nothing else was changed. See Prowlarr's full error with:\n"
+                         "  docker logs --tail 30 prowlarr")
+                print("Added the tags to it.")
+            else:
+                print("It already has those tags.")
+        print("Moving on to the app sync.")
     else:
         privacy = ix.get("privacy", "unknown")
         if privacy != "public":
             fail(f"'{real_name}' is a {privacy} indexer, so it needs a login, invite or API key.",
                  "This script only fills in public indexers. Add it in Prowlarr's web interface "
                  "with the Search only profile, then run this script again with the same name "
-                 "to push it to the other apps.")
+                 "(and any --tag options) to push it to the other apps.")
         profile = next((p for p in api("GET", "appprofile") if p["name"] == PROFILE), None)
         if profile is None:
             fail(f"Prowlarr has no sync profile called '{PROFILE}'.",
@@ -167,7 +292,6 @@ def main():
         ix["enable"] = True
         ix["appProfileId"] = profile["id"]
         ix["priority"] = 25
-        ix.setdefault("tags", [])
 
         print(f"Testing '{real_name}' through Prowlarr (can take up to 2 minutes)...")
         try:
@@ -177,12 +301,16 @@ def main():
                  "Common causes: the site is down or slow, so try again later; or it blocks or "
                  "stalls Prowlarr the way the Internet Archive does, in which case it needs a "
                  "custom definition. Opening the site in a browser shows whether it's up.")
+
+        tag_ids += create_tags(to_create)
+        ix["tags"] = sorted(set(tag_ids))
         try:
             api("POST", "indexer", ix)
         except urllib.error.HTTPError as e:
             fail(f"The test passed but Prowlarr refused to save it. Prowlarr said: {prowlarr_says(e)}",
                  "See Prowlarr's full error with:\n  docker logs --tail 30 prowlarr")
-        print(f"Added '{real_name}' to Prowlarr with the '{PROFILE}' profile.")
+        tagnote = f" and {len(ix['tags'])} tag(s)" if ix["tags"] else ""
+        print(f"Added '{real_name}' to Prowlarr with the '{PROFILE}' profile{tagnote}.")
 
     sync = os.path.join(HERE, "sync-indexer.sh")
     if not os.access(sync, os.X_OK):
@@ -193,8 +321,10 @@ def main():
     result = subprocess.run([sync, real_name, limit])
     if result.returncode != 0:
         print(f"\n'{real_name}' is saved in Prowlarr, but not every app received it. "
-              "The lines above say which. Running this again with the same name retries "
-              "the sync without adding it twice.", file=sys.stderr)
+              "The lines above say which.", file=sys.stderr)
+        explain_missing(real_name)
+        print("\nRunning this again with the same name retries the sync without adding it twice.",
+              file=sys.stderr)
     return result.returncode
 
 

@@ -1,0 +1,132 @@
+groups:
+  - name: host
+    rules:
+      - alert: TargetDown
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: '{{ $labels.job }} on {{ $labels.instance }} is not responding'
+
+      - alert: HostDiskSpaceLow
+        expr: (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|nsfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|nsfs"}) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: '{{ $labels.mountpoint }} is {{ $value | printf "%.0f" }}% full'
+
+      - alert: HostDiskSpaceLow
+        expr: (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|nsfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|nsfs"}) * 100 > 95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: '{{ $labels.mountpoint }} is {{ $value | printf "%.0f" }}% full'
+
+      - alert: HostDiskWillFill
+        expr: predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|nsfs"}[6h], 24 * 3600) < 0 and (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|nsfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|nsfs"}) * 100 > 80
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: '{{ $labels.mountpoint }} will fill within 24 hours at the current rate'
+
+      - alert: HostMemoryLow
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100 < 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Available memory is {{ $value | printf "%.0f" }}%'
+
+      - alert: HostOomKill
+        expr: increase(node_vmstat_oom_kill[15m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: 'The kernel killed a process for lack of memory'
+
+      - alert: HostRebooted
+        expr: (time() - node_boot_time_seconds) < 900
+        labels:
+          severity: warning
+        annotations:
+          summary: 'homelab-01 rebooted in the last 15 minutes'
+
+      - alert: HostRebootRequired
+        expr: node_reboot_required == 1
+        for: 24h
+        labels:
+          severity: warning
+        annotations:
+          summary: 'homelab-01 has needed a reboot for over a day to finish installing updates'
+
+      - alert: HostCpuHot
+        expr: max by (instance) (node_hwmon_temp_celsius{chip=~".*coretemp.*"}) > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'CPU is at {{ $value | printf "%.0f" }}°C'
+
+      - alert: HostCpuHot
+        expr: max by (instance) (node_hwmon_temp_celsius{chip=~".*coretemp.*"}) > 95
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'CPU is at {{ $value | printf "%.0f" }}°C'
+
+      - alert: DiskSmartFailed
+        expr: smartctl_device_smart_status == 0
+        labels:
+          severity: critical
+        annotations:
+          summary: 'SMART reports {{ $labels.device }} as failing'
+
+      - alert: DiskBadSectorsGrowing
+        expr: delta(smartctl_device_attribute{attribute_value_type="raw",attribute_name=~"Reallocated_Sector_Ct|Reallocated_Event_Count|Offline_Uncorrectable|Reported_Uncorrect"}[24h]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: '{{ $labels.device }}: {{ $labels.attribute_name }} rose by {{ $value | printf "%.0f" }} in the last 24 hours'
+
+      - alert: DiskPendingSectors
+        expr: smartctl_device_attribute{attribute_value_type="raw",attribute_name="Current_Pending_Sector"} > 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: '{{ $labels.device }} has {{ $value | printf "%.0f" }} sectors waiting to be remapped'
+
+      - alert: DiskErrorLogGrowing
+        expr: delta(smartctl_device_error_log_count[24h]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: '{{ $labels.device }} logged new errors in the last 24 hours'
+
+      - alert: DiskSelfTestFailed
+        expr: floor(smartctl_device_smartctl_exit_status / 128) % 2 == 1
+        labels:
+          severity: critical
+        annotations:
+          summary: '{{ $labels.device }} has a failed SMART self-test in its log'
+
+      - alert: DiskSmartUnreadable
+        expr: floor(smartctl_device_smartctl_exit_status / 2) % 4 > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'SMART data for {{ $labels.device }} could not be read'
+
+      - alert: DiskHot
+        expr: smartctl_device_temperature{temperature_type="current"} > 60
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: '{{ $labels.device }} is at {{ $value | printf "%.0f" }}°C'

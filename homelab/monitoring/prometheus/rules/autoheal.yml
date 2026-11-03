@@ -1,0 +1,16 @@
+groups:
+  - name: autoheal
+    rules:
+      - alert: ContainerAutoHealed
+        expr: time() - autoheal_last_restart_timestamp_seconds < 900
+        labels:
+          severity: warning
+        annotations:
+          summary: '{{ $labels.container }} was unhealthy, so autoheal restarted it'
+
+      - alert: ContainerHealGaveUp
+        expr: autoheal_gave_up == 1
+        labels:
+          severity: critical
+        annotations:
+          summary: '{{ $labels.container }} is still unhealthy after 3 restarts in 6 hours, so autoheal has stopped restarting it'
