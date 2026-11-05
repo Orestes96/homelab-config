@@ -3,7 +3,10 @@
 # Titles are processed in disc order: the number after the final "_t" in the
 # file name, which MakeMKV adds by default.
 #   longer than 2.5x MIN_MINUTES      -> treated as "Play All" and DELETED
-#   MIN_MINUTES to MAX_MINUTES incl.  -> episode, numbered from FIRST_EPISODE
+#   MIN_MINUTES to MAX_MINUTES incl.  -> episode, numbered from FIRST_EPISODE,
+#                                        unless it duplicates an episode already
+#                                        in the season or earlier on this disc
+#                                        (moved to _duplicates/, not numbered)
 #   anything else                     -> extras/
 # MIN defaults to 18, MAX to MIN+5. Numbering never goes past LAST_EPISODE
 # (surplus goes to extras/ with a warning). An episode file that already
@@ -20,12 +23,29 @@ last="${7:-}"
 
 dest=$(printf "/srv/media/rips/tv/%s/Season %02d" "$show" "$season")
 extras="/srv/media/rips/extras/$show"
+dupes="/srv/media/rips/_duplicates/$show"
 mkdir -p "$dest" "$extras"
 
 minsecs=$((min * 60))
 maxsecs=$((max * 60))
 playall=$((minsecs * 5 / 2))
 found=0
+
+# Fingerprint: exact size plus a hash of 8 MiB from the middle of the file.
+# MakeMKV writes a different header and trailer for every title, so the
+# ends are skipped; the video in the middle is what identifies a duplicate.
+fp() {
+  local size
+  size=$(stat -c %s "$1")
+  printf '%s-%s' "$size" "$(dd if="$1" bs=1M skip=$((size / 2097152)) count=8 status=none | md5sum | cut -d' ' -f1)"
+}
+
+# Fingerprints of episodes already in this season.
+declare -A seen
+for e in "$dest"/*.mkv; do
+  [ -e "$e" ] || continue
+  seen["$(fp "$e")"]=$(basename "$e")
+done
 
 # List .mkv files in disc order.
 ordered() {
@@ -42,8 +62,13 @@ while IFS= read -r f; do
     rm -f "$f"
     echo "Deleted play-all: $(basename "$f")  ($secs s)"
   elif [ "$secs" -ge "$minsecs" ] && [ "$secs" -le "$maxsecs" ]; then
+    key=$(fp "$f")
     name=$(printf "%s - s%02de%02d.mkv" "$show" "$season" "$ep")
-    if [ -n "$last" ] && [ "$ep" -gt "$last" ]; then
+    if [ -n "${seen[$key]:-}" ]; then
+      mkdir -p "$dupes"
+      mv "$f" "$dupes/"
+      echo "Duplicate: $(basename "$f")  ($secs s) is the same video as ${seen[$key]}, moved to _duplicates"
+    elif [ -n "$last" ] && [ "$ep" -gt "$last" ]; then
       mv "$f" "$extras/"
       echo "WARNING over total: $(basename "$f")  ($secs s) sent to extras, series already has $last episodes"
     elif [ -e "$dest/$name" ]; then
@@ -51,6 +76,7 @@ while IFS= read -r f; do
       echo "WARNING exists: $name already on disk, $(basename "$f")  ($secs s) sent to extras"
     else
       mv "$f" "$dest/$name"
+      seen["$key"]="$name"
       echo "Episode: $name  ($secs s)"
       ep=$((ep + 1))
       found=$((found + 1))

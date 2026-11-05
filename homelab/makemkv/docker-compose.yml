@@ -7,13 +7,16 @@ services:
     volumes:
       - ./config:/config
       - /srv/media/rips:/output
-    devices:
-      - /dev/sr0
-      - /dev/sg1
+      - /dev:/dev
+    device_cgroup_rules:
+      - 'b 11:* rmw'
+      - 'c 21:* rmw'
     environment:
       - USER_ID=1000
       - GROUP_ID=1000
+      - SUP_GROUP_IDS=24
       - TZ=Europe/London
       - AUTO_DISC_RIPPER=1
       - AUTO_DISC_RIPPER_EJECT=1
+      - AUTO_DISC_RIPPER_PARALLEL_RIP=1
     restart: unless-stopped

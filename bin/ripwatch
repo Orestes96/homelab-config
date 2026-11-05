@@ -3,7 +3,10 @@
 # TV discs: show, season and disc number come from the disc label. Each sorted
 # disc records its episode count in "Season NN/.discs"; the next disc numbers on
 # from the discs before it, and a disc whose predecessors are missing waits
-# (.pending) until they arrive. TOTAL_S<n> in the show's .ripsort caps the
+# (.pending) until they arrive. A label with a show and season but no disc
+# number is assumed to be the next disc after those already sorted (reported
+# as "assumed disc N"; an assumed disc with no new episodes is treated as a
+# re-rip and not recorded). TOTAL_S<n> in the show's .ripsort caps the
 # numbering; DISCS_S<n> (optional) fixes the layout instead. Unknown shows are
 # parked and reported; run newseries to resolve.
 set -uo pipefail
@@ -58,6 +61,7 @@ for marker in "$RIPS"/*/.done; do
   # shellcheck source=/dev/null
   source "$CONF"
   out=""
+  assumed=""
 
   case "${MODE:-off}" in
     off)
@@ -79,12 +83,23 @@ for marker in "$RIPS"/*/.done; do
       [ -n "$show" ] && [ -f "$cfg" ] && source "$cfg"
       min="${MIN_MINUTES:-18}"
       max="${MAX_MINUTES:-$((min + 5))}"
-      mapvar="DISCS_S${SEASON:-0}"; totvar="TOTAL_S${SEASON:-0}"
-      read -ra counts <<< "${!mapvar:-}"
-      total="${!totvar:-}"
       seasondir=$(printf "%s/%s/Season %02d" "$TV" "${show:-_}" "${SEASON:-0}")
       record="$seasondir/.discs"
       first=""; last=""; parked=""
+
+      # Season but no disc number: assume the next disc after those already sorted.
+      if [ -n "$show" ] && [ -n "$SEASON" ] && [ -z "$DISC" ]; then
+        maxd=0
+        if [ -f "$record" ]; then
+          maxd=$(awk 'BEGIN{m=0} $1+0>m{m=$1+0} END{print m}' "$record")
+        fi
+        DISC=$((maxd + 1))
+        assumed="Label has no disc number, so assumed disc $DISC (next after the discs already sorted). If that's wrong, tell Claude before ripping more of this series."
+      fi
+
+      mapvar="DISCS_S${SEASON:-0}"; totvar="TOTAL_S${SEASON:-0}"
+      read -ra counts <<< "${!mapvar:-}"
+      total="${!totvar:-}"
 
       if [ -z "$show" ]; then
         parked="Unknown show: $folder (label show='${SHOW_RAW:-?}'). Run: newseries \"Show Name\" SEASON TOTAL  then it will sort."
@@ -123,7 +138,10 @@ for marker in "$RIPS"/*/.done; do
         out=$("$HOME/bin/sorttv" "$folder" "$show" "$SEASON" "$first" "$min" "$max" "$last" 2>&1)
         found=$(printf '%s\n' "$out" | sed -n 's/^EPISODES=\([0-9]*\)$/\1/p' | tail -n1)
         out=$(printf '%s\n' "$out" | grep -v '^EPISODES=')
-        if [ -n "$found" ]; then
+        if [ -n "$found" ] && [ -n "$assumed" ] && [ "$found" -eq 0 ]; then
+          out="$out
+No new episodes on this disc, so it is probably a re-rip of a disc already sorted. Nothing recorded."
+        elif [ -n "$found" ]; then
           mkdir -p "$seasondir"
           printf '%s %s\n' "$DISC" "$found" >> "$record"
           have=$(ls "$seasondir"/*.mkv 2>/dev/null | wc -l)
@@ -145,6 +163,8 @@ WARNING: sorttv did not complete; nothing recorded. $folder left in place."
       fi ;;
   esac
 
+  [ -n "$assumed" ] && out="$assumed
+$out"
   printf "\n== %s  %s ==\n%s\n" "$(date '+%F %T')" "$folder" "$out" >> "$LOG"
   notify "$folder
 $out"
