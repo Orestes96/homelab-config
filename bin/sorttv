@@ -8,6 +8,9 @@
 #                                        in the season or earlier on this disc
 #                                        (moved to _duplicates/, not numbered)
 #   anything else                     -> extras/
+# KEEP_EXTRAS=0 in the show's tv/<Show>/.ripsort deletes extras SHORTER than
+# MIN_MINUTES instead (longer oddities still go to extras/ so nothing that
+# could be an episode is lost).
 # MIN defaults to 18, MAX to MIN+5. Numbering never goes past LAST_EPISODE
 # (surplus goes to extras/ with a warning). An episode file that already
 # exists is never overwritten. The final line is EPISODES=N for ripwatch.
@@ -24,7 +27,15 @@ last="${7:-}"
 dest=$(printf "/srv/media/rips/tv/%s/Season %02d" "$show" "$season")
 extras="/srv/media/rips/extras/$show"
 dupes="/srv/media/rips/_duplicates/$show"
-mkdir -p "$dest" "$extras"
+mkdir -p "$dest"
+
+# Per-show setting (only KEEP_EXTRAS is used here; lengths come from the arguments).
+KEEP_EXTRAS=1
+showcfg="/srv/media/rips/tv/$show/.ripsort"
+if [ -f "$showcfg" ]; then
+  KEEP_EXTRAS=$(sed -nE 's/^KEEP_EXTRAS=([01])$/\1/p' "$showcfg" | tail -n1)
+  KEEP_EXTRAS="${KEEP_EXTRAS:-1}"
+fi
 
 minsecs=$((min * 60))
 maxsecs=$((max * 60))
@@ -38,6 +49,11 @@ fp() {
   local size
   size=$(stat -c %s "$1")
   printf '%s-%s' "$size" "$(dd if="$1" bs=1M skip=$((size / 2097152)) count=8 status=none | md5sum | cut -d' ' -f1)"
+}
+
+to_extras() {
+  mkdir -p "$extras"
+  mv "$1" "$extras/"
 }
 
 # Fingerprints of episodes already in this season.
@@ -69,10 +85,10 @@ while IFS= read -r f; do
       mv "$f" "$dupes/"
       echo "Duplicate: $(basename "$f")  ($secs s) is the same video as ${seen[$key]}, moved to _duplicates"
     elif [ -n "$last" ] && [ "$ep" -gt "$last" ]; then
-      mv "$f" "$extras/"
+      to_extras "$f"
       echo "WARNING over total: $(basename "$f")  ($secs s) sent to extras, series already has $last episodes"
     elif [ -e "$dest/$name" ]; then
-      mv "$f" "$extras/"
+      to_extras "$f"
       echo "WARNING exists: $name already on disk, $(basename "$f")  ($secs s) sent to extras"
     else
       mv "$f" "$dest/$name"
@@ -81,8 +97,11 @@ while IFS= read -r f; do
       ep=$((ep + 1))
       found=$((found + 1))
     fi
+  elif [ "$KEEP_EXTRAS" = "0" ] && [ "$secs" -lt "$minsecs" ]; then
+    rm -f "$f"
+    echo "Deleted extra: $(basename "$f")  ($secs s)"
   else
-    mv "$f" "$extras/"
+    to_extras "$f"
     echo "Extra:   $(basename "$f")  ($secs s)"
   fi
 done < <(ordered)

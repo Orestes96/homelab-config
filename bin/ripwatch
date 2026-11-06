@@ -77,12 +77,13 @@ for marker in "$RIPS"/*/.done; do
       fi
       [ -z "$SEASON" ] && SEASON="${SEASON_DEFAULT:-}"
 
-      unset MIN_MINUTES MAX_MINUTES; unset "${!DISCS_S@}" "${!TOTAL_S@}"
+      unset MIN_MINUTES MAX_MINUTES "${!MAX_MINUTES_S@}"; unset "${!DISCS_S@}" "${!TOTAL_S@}"
       cfg="$TV/${show:-_}/.ripsort"
       # shellcheck source=/dev/null
       [ -n "$show" ] && [ -f "$cfg" ] && source "$cfg"
       min="${MIN_MINUTES:-18}"
       max="${MAX_MINUTES:-$((min + 5))}"
+      maxs="MAX_MINUTES_S${SEASON:-0}"; max="${!maxs:-$max}"
       seasondir=$(printf "%s/%s/Season %02d" "$TV" "${show:-_}" "${SEASON:-0}")
       record="$seasondir/.discs"
       first=""; last=""; parked=""
