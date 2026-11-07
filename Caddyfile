@@ -97,3 +97,7 @@ http://qbt.home.arpa {
 http://lazylibrarian.home.arpa {
     reverse_proxy localhost:5299
 }
+
+http://rips.home.arpa {
+reverse_proxy 127.0.0.1:3013
+}

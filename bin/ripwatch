@@ -38,7 +38,7 @@ parse_label() {
 # True if a label parses to the given show and season (runs in a subshell so
 # the caller's parsed values are untouched).
 label_is() {
-  ( parse_label "$1"; [ "$(norm "$SHOW_RAW")" = "$(norm "$2")" ] && [ "$SEASON" = "$3" ] )
+  ( parse_label "$1"; s=$(find_show "$SHOW_RAW") || s=""; [ "$s" = "$2" ] && [ "$SEASON" = "$3" ] )
 }
 
 # Find an existing show folder whose normalised name matches.
@@ -50,6 +50,7 @@ find_show() {
     [ -d "$d" ] || continue
     local name; name=$(basename "$d")
     if [ "$(norm "$name")" = "$want" ]; then printf '%s' "$name"; return 0; fi
+    if grep -qiE "^ALIASES=.*\b$want\b" "$d.ripsort" 2>/dev/null; then printf '%s' "$name"; return 0; fi
   done
   return 1
 }
