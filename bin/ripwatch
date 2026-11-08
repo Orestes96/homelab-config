@@ -9,9 +9,13 @@
 # re-rip and not recorded). TOTAL_S<n> in the show's .ripsort caps the
 # numbering; DISCS_S<n> (optional) fixes the layout instead. Unknown shows are
 # parked and reported; run newseries to resolve.
+# Studio-code labels (e.g. EC_108887) are mapped to a show and season in
+# ~/.config/ripsort/labels, one per line: LABEL|Show Name|SEASON
+# MakeMKV's random "-XXXXXX" suffix on repeat labels is ignored for the lookup.
 set -uo pipefail
 
 CONF="$HOME/.config/ripsort/series.conf"
+LABELS="$HOME/.config/ripsort/labels"
 LOG="$HOME/.config/ripsort/ripwatch.log"
 TOPIC=$(cat "$HOME/.ntfy-rips-topic")
 RIPS="/srv/media/rips"
@@ -25,9 +29,21 @@ notify() { curl -s -d "$1" "https://ntfy.sh/$TOPIC" >/dev/null; }
 # non-alphanumerics, drop a trailing "s" so SIMPSON and SIMPSONS match.
 norm()   { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/^the //; s/[^a-z0-9]//g; s/s$//'; }
 
+# Look up a label in the labels file; prints "Show Name|SEASON" on a match.
+lookup_label() {
+  [ -f "$LABELS" ] || return 1
+  awk -F'|' -v k="$1" 'toupper($1)==toupper(k) && NF>=3 {print $2 "|" $3; found=1; exit} END{exit !found}' "$LABELS"
+}
+
 # Parse a disc label into SHOW_RAW / SEASON / DISC (any may come back empty).
 parse_label() {
-  local label="$1" up
+  local label="$1" up hit base
+  base=$(printf '%s' "$label" | sed -E 's/-[A-Za-z0-9]{6}$//')
+  hit=$(lookup_label "$label") || hit=$(lookup_label "$base") || hit=""
+  if [ -n "$hit" ]; then
+    SHOW_RAW="${hit%%|*}"; SEASON="${hit#*|}"; DISC=""
+    return 0
+  fi
   up=$(printf '%s' "$label" | tr '[:lower:]' '[:upper:]' | tr ' -' '__')
   SEASON=$(printf '%s' "$up" | sed -nE 's/.*(SEASON|SERIES|S)_*0*([0-9]{1,2})(_|$|D).*/\2/p' | head -n1)
   DISC=$(printf '%s' "$up" | sed -nE 's/.*(DISC|DISK|D)_*0*([0-9]{1,2})(_|$).*/\2/p' | head -n1)
@@ -104,7 +120,7 @@ for marker in "$RIPS"/*/.done; do
       total="${!totvar:-}"
 
       if [ -z "$show" ]; then
-        parked="Unknown show: $folder (label show='${SHOW_RAW:-?}'). Run: newseries \"Show Name\" SEASON TOTAL  then it will sort."
+        parked="Unknown show: $folder (label show='${SHOW_RAW:-?}'). Run: newseries \"Show Name\" SEASON TOTAL  then it will sort. For a studio-code label, add LABEL|Show Name|SEASON to ~/.config/ripsort/labels."
       elif [ -z "$SEASON" ] || [ -z "$DISC" ]; then
         parked="Unreadable label: $folder (season='${SEASON:-?}', disc='${DISC:-?}'). Label needs S<n> and D<n>; or sort by hand with sorttv."
       elif [ -f "$record" ] && grep -q "^$DISC " "$record"; then
@@ -146,6 +162,7 @@ No new episodes on this disc, so it is probably a re-rip of a disc already sorte
         elif [ -n "$found" ]; then
           mkdir -p "$seasondir"
           printf '%s %s\n' "$DISC" "$found" >> "$record"
+          "$HOME/bin/engdefault" "$seasondir" >/dev/null 2>&1
           have=$(ls "$seasondir"/*.mkv 2>/dev/null | wc -l)
           out="$out
 Disc $DISC: $found episodes from e$first. Series $SEASON: $have of ${total:-?} on disk."
