@@ -11,6 +11,7 @@ services:
       - ./config:/config
       - ./cache:/cache
       - /srv/media:/data:ro
+      - /srv/media/rips/tv:/data/rips/tv
     devices:
       - /dev/dri:/dev/dri
     environment:

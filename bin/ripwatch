@@ -80,6 +80,13 @@ for marker in "$RIPS"/*/.done; do
   out=""
   assumed=""
 
+  # A rip started as a film (rescuerip --film) carries its title in .film
+  # and goes to Movies whatever the mode.
+  if [ -f "$dir/.film" ]; then
+    ftitle=$(head -n1 "$dir/.film"); rm -f "$dir/.film"
+    out=$("$HOME/bin/sortfilm" "$folder" "$ftitle" 2>&1)
+    "$HOME/bin/engdefault" "$RIPS/movies/$ftitle" >/dev/null 2>&1
+  else
   case "${MODE:-off}" in
     off)
       out="Sorting is off. $folder left in place." ;;
@@ -181,6 +188,7 @@ WARNING: sorttv did not complete; nothing recorded. $folder left in place."
         fi
       fi ;;
   esac
+  fi
 
   [ -n "$assumed" ] && out="$assumed
 $out"
