@@ -7,6 +7,10 @@ services:
     volumes:
       - ./config:/config
       - /srv/media:/data:ro
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "991"
     tmpfs:
       - /transcode
     environment:
