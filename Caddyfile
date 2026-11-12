@@ -102,3 +102,7 @@ http://rips.home.arpa {
     reverse_proxy /api/* 127.0.0.1:3014
 reverse_proxy 127.0.0.1:3013
 }
+
+http://coffee.home.arpa {
+reverse_proxy 127.0.0.1:3015
+}
