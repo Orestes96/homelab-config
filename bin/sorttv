@@ -8,6 +8,12 @@
 #                                        in the season or earlier on this disc
 #                                        (moved to _duplicates/, not numbered)
 #   anything else                     -> extras/
+# Before numbering, the episode-length titles are checked against the disc's
+# Play All length. If they add up to one title too many, the one title that
+# explains the excess (for example a 20-minute extras reel in a show whose
+# episodes run 18 to 32 minutes) goes to extras/ and is not numbered. If the
+# lengths don't add up and no single title explains why, everything is
+# numbered as before and a WARNING line says so.
 # KEEP_EXTRAS=0 in the show's tv/<Show>/.ripsort deletes extras SHORTER than
 # MIN_MINUTES instead (longer oddities still go to extras/ so nothing that
 # could be an episode is lost).
@@ -72,11 +78,66 @@ ordered() {
   done | sort -n | cut -f2-
 }
 
-while IFS= read -r f; do
-  secs=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$f" | cut -d. -f1)
+# Pre-pass: read every title's length once, in disc order.
+mapfile -t files < <(ordered)
+declare -a lens=()
+for i in "${!files[@]}"; do
+  lens[i]=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "${files[$i]}" | cut -d. -f1)
+done
+
+# Reconcile the episode-length titles with the disc's Play All length(s).
+drop=-1
+pa_sum=0; pa_max=0; cand_sum=0
+declare -A pre=()
+for k in "${!seen[@]}"; do pre["$k"]=1; done
+declare -a cand_idx=() cand_len=()
+for i in "${!files[@]}"; do
+  s=${lens[$i]}
+  if [ "$s" -ge "$playall" ]; then
+    pa_sum=$((pa_sum + s))
+    if [ "$s" -gt "$pa_max" ]; then pa_max=$s; fi
+  elif [ "$s" -ge "$minsecs" ] && [ "$s" -le "$maxsecs" ]; then
+    k=$(fp "${files[$i]}")
+    if [ -z "${pre[$k]:-}" ]; then
+      pre["$k"]=1
+      cand_idx+=("$i"); cand_len+=("$s"); cand_sum=$((cand_sum + s))
+    fi
+  fi
+done
+if [ "$pa_sum" -gt 0 ] && [ "${#cand_idx[@]}" -gt 1 ]; then
+  d1=$((cand_sum - pa_sum)); d1=${d1#-}
+  d2=$((cand_sum - pa_max)); d2=${d2#-}
+  if [ "$d1" -gt 90 ] && [ "$d2" -gt 90 ]; then
+    if [ "$cand_sum" -gt "$pa_max" ]; then
+      best=-1; bestd=999999; second=999999
+      for j in "${!cand_idx[@]}"; do
+        e1=$((cand_sum - cand_len[j] - pa_sum)); e1=${e1#-}
+        e2=$((cand_sum - cand_len[j] - pa_max)); e2=${e2#-}
+        e=$e1
+        if [ "$e2" -lt "$e" ]; then e=$e2; fi
+        if [ "$e" -lt "$bestd" ]; then second=$bestd; bestd=$e; best=$j
+        elif [ "$e" -lt "$second" ]; then second=$e; fi
+      done
+      if [ "$bestd" -le 15 ] && [ $((second - bestd)) -ge 20 ]; then
+        echo "WARNING reconcile: episode-length titles add up to $cand_sum s but the play-all is $pa_max s. $(basename "${files[${cand_idx[$best]}]}") (${cand_len[$best]} s) is the one the play-all leaves out. It may be an extra or a real episode, so it is numbered as before; check it by hand."
+      else
+        echo "WARNING reconcile: episode-length titles add up to $cand_sum s but the play-all is $pa_max s, and no single title explains the difference. Numbering them all; check this disc by hand."
+      fi
+    elif [ "$cand_sum" -lt "$pa_sum" ] && [ "$cand_sum" -lt "$pa_max" ]; then
+      echo "WARNING reconcile: episode-length titles add up to $cand_sum s but the play-all is $pa_max s. An episode may be longer than MAX_MINUTES, or missing."
+    fi
+  fi
+fi
+
+for i in "${!files[@]}"; do
+  f="${files[$i]}"
+  secs="${lens[$i]}"
   if [ "$secs" -ge "$playall" ]; then
     rm -f "$f"
     echo "Deleted play-all: $(basename "$f")  ($secs s)"
+  elif [ "$i" -eq "$drop" ]; then
+    to_extras "$f"
+    echo "Extra:   $(basename "$f")  ($secs s)"
   elif [ "$secs" -ge "$minsecs" ] && [ "$secs" -le "$maxsecs" ]; then
     key=$(fp "$f")
     name=$(printf "%s - s%02de%02d.mkv" "$show" "$season" "$ep")
@@ -104,7 +165,7 @@ while IFS= read -r f; do
     to_extras "$f"
     echo "Extra:   $(basename "$f")  ($secs s)"
   fi
-done < <(ordered)
+done
 
 rm -f "$src/.done" "$src/.pending"
 rmdir "$src" 2>/dev/null || echo "Left $src in place (not empty)."
