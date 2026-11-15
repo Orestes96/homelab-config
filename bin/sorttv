@@ -69,6 +69,28 @@ for e in "$dest"/*.mkv; do
   seen["$(fp "$e")"]=$(basename "$e")
 done
 
+# Near-duplicate check (a near-duplicate is a copy of an episode that is not
+# byte-identical). A Blu-ray ripped with every title contains each episode
+# twice: once as a playlist and once as the raw video file, with the same
+# length but a slightly different size, so the fingerprint above misses it.
+# A title counts as a copy of an episode already kept from THIS disc when its
+# length is within 2 s and its size within 2%. The first one (lower title
+# number, the playlist version) is kept; the copy goes to _duplicates/.
+declare -a dsecs=() dsize=() dname=()
+nd() {  # $1 = length in s, $2 = size in bytes; prints the name of the match
+  local j d r
+  for j in "${!dsecs[@]}"; do
+    d=$(($1 - dsecs[j])); d=${d#-}
+    [ "$d" -le 2 ] || continue
+    r=$(($2 - dsize[j])); r=${r#-}
+    if [ $((r * 100)) -le $((dsize[j] * 2)) ]; then
+      printf '%s' "${dname[j]}"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # List .mkv files in disc order.
 ordered() {
   for f in "$src"/*.mkv; do
@@ -100,7 +122,11 @@ for i in "${!files[@]}"; do
     k=$(fp "${files[$i]}")
     if [ -z "${pre[$k]:-}" ]; then
       pre["$k"]=1
-      cand_idx+=("$i"); cand_len+=("$s"); cand_sum=$((cand_sum + s))
+      sz=$(stat -c %s "${files[$i]}")
+      if ! nd "$s" "$sz" >/dev/null; then
+        dsecs+=("$s"); dsize+=("$sz"); dname+=("x")
+        cand_idx+=("$i"); cand_len+=("$s"); cand_sum=$((cand_sum + s))
+      fi
     fi
   fi
 done
@@ -129,6 +155,7 @@ if [ "$pa_sum" -gt 0 ] && [ "${#cand_idx[@]}" -gt 1 ]; then
   fi
 fi
 
+dsecs=(); dsize=(); dname=()
 for i in "${!files[@]}"; do
   f="${files[$i]}"
   secs="${lens[$i]}"
@@ -145,6 +172,10 @@ for i in "${!files[@]}"; do
       mkdir -p "$dupes"
       mv "$f" "$dupes/"
       echo "Duplicate: $(basename "$f")  ($secs s) is the same video as ${seen[$key]}, moved to _duplicates"
+    elif nearname=$(nd "$secs" "$(stat -c %s "$f")"); then
+      mkdir -p "$dupes"
+      mv "$f" "$dupes/"
+      echo "Duplicate: $(basename "$f")  ($secs s) has the same length and nearly the same size as $nearname from this disc, so it is a copy, moved to _duplicates"
     elif [ -n "$last" ] && [ "$ep" -gt "$last" ]; then
       to_extras "$f"
       echo "WARNING over total: $(basename "$f")  ($secs s) sent to extras, series already has $last episodes"
@@ -154,6 +185,7 @@ for i in "${!files[@]}"; do
     else
       mv "$f" "$dest/$name"
       seen["$key"]="$name"
+      dsecs+=("$secs"); dsize+=("$(stat -c %s "$dest/$name")"); dname+=("$name")
       echo "Episode: $name  ($secs s)"
       ep=$((ep + 1))
       found=$((found + 1))
