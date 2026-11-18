@@ -1,0 +1,5 @@
+# safe-reboot: reboot at 02:00 UTC only when updates need it and nothing is busy;
+# after boot, check the containers came back. Source of truth (labsync):
+# /home/elliot/homelab/scripts/cron/safe-reboot. Installed copy: /etc/cron.d/safe-reboot
+0 2 * * * root /usr/local/sbin/safe-reboot >> /var/log/safe-reboot.log 2>&1
+@reboot root /usr/local/sbin/safe-reboot --after-boot >> /var/log/safe-reboot.log 2>&1

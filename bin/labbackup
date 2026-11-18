@@ -12,6 +12,21 @@ QZ=/home/elliot/homelab/quiz-platform/data
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
+# Root runs the root-owned copy /usr/local/sbin/labbackup; the source of truth,
+# tracked by labsync, is /home/elliot/bin/labbackup. Warn (log + ntfy) when they
+# differ, but still back up with the installed copy.
+SOURCE=/home/elliot/bin/labbackup
+SELF=$(readlink -f "$0")
+if [ "$SELF" != "$SOURCE" ] && ! cmp -s "$SELF" "$SOURCE"; then
+  MSG="Problem: the installed labbackup ($SELF) differs from the tracked copy ($SOURCE).
+How to fix it: if the tracked copy is the one you want, reinstall it with: sudo install -m 755 -o root -g root $SOURCE /usr/local/sbin/labbackup
+What changed: Nothing. Tonight's backup ran with the installed copy."
+  echo "$(date -Is) WARNING: $MSG" >> "$LOG"
+  logger -t labbackup -- "$MSG" 2>/dev/null || true
+  TOPIC=$(cat /home/elliot/.ntfy-topic 2>/dev/null) && \
+    curl -s -m 15 -H "Title: labbackup copy out of date" -d "$MSG" "https://ntfy.sh/$TOPIC" >/dev/null
+fi
+
 mkdir -p "$DEST"
 
 FILES=()

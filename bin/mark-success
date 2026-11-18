@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# mark-success: records that a scheduled job finished OK, for Prometheus.
+# Usage: mark-success <job-name> <max-age-seconds>
+set -euo pipefail
+
+name="$1"
+max="$2"
+out="/var/lib/node_exporter/textfile/cronjob_${name}.prom"
+tmp="$(mktemp "${out}.XXXXXX")"
+
+cat > "$tmp" <<METRICS
+# HELP cronjob_last_success_timestamp_seconds When the job last finished successfully.
+# TYPE cronjob_last_success_timestamp_seconds gauge
+cronjob_last_success_timestamp_seconds{cronjob="${name}"} $(date +%s)
+# HELP cronjob_max_age_seconds How old the last success may get before alerting.
+# TYPE cronjob_max_age_seconds gauge
+cronjob_max_age_seconds{cronjob="${name}"} ${max}
+METRICS
+
+chmod 644 "$tmp"
+mv "$tmp" "$out"

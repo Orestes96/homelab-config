@@ -22,6 +22,7 @@ SOURCES=(
   /home/elliot/homelab/arr
   /home/elliot/homelab/plex
   /home/elliot/ebooks
+  /home/elliot/homelab/nextup/data
 )
 PLEX="/home/elliot/homelab/plex/config/Library/Application Support/Plex Media Server"
 ADGUARD_CONF="/opt/adguardhome/conf/AdGuardHome.yaml"

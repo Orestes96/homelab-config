@@ -1,0 +1,10 @@
+# Rotates safe-reboot's log. Source of truth (labsync):
+# /home/elliot/homelab/scripts/logrotate/safe-reboot. Installed copy: /etc/logrotate.d/safe-reboot
+/var/log/safe-reboot.log {
+    su root adm
+    weekly
+    rotate 4
+    compress
+    missingok
+    notifempty
+}

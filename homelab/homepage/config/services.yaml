@@ -15,6 +15,10 @@
         href: http://makemkv.home.arpa
         description: Disc ripper
         siteMonitor: http://makemkv.home.arpa
+    - Rips:
+        href: http://rips.home.arpa
+        description: Rip progress and drive status
+        siteMonitor: http://rips.home.arpa
     - Books:
         href: http://books.home.arpa
         description: Calibre-Web Automated
@@ -47,6 +51,10 @@
         siteMonitor: http://qbt.home.arpa
 
 - Apps:
+    - nextup:
+        href: http://nextup.home.arpa
+        description: Games and books backlog
+        siteMonitor: http://nextup.home.arpa
     - Quiz platform:
         href: http://quiz.home.arpa
         description: Production

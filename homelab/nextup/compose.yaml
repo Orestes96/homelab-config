@@ -1,0 +1,16 @@
+services:
+  nextup:
+    build: ./src
+    image: nextup:local
+    container_name: nextup
+    network_mode: host  # uvicorn binds 127.0.0.1:3016 only; Caddy (host network) proxies it
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - TZ=Europe/London
+      - NEXTUP_DB=/data/nextup.db
+      - CALIBRE_LIBRARY=/calibre-library
+    volumes:
+      - ./data:/data
+      - /home/elliot/ebooks/library:/calibre-library:ro
+      - /home/elliot/ebooks/config:/cwa:ro  # Calibre-Web config, for app.db read status only (WAL needs the folder); never written
