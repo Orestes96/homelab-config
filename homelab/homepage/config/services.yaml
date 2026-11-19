@@ -11,10 +11,6 @@
         href: http://plex.home.arpa
         description: Films, TV, extras
         siteMonitor: http://plex.home.arpa/identity
-    - MakeMKV:
-        href: http://makemkv.home.arpa
-        description: Disc ripper
-        siteMonitor: http://makemkv.home.arpa
     - Rips:
         href: http://rips.home.arpa
         description: Rip progress and drive status

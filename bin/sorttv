@@ -2,7 +2,9 @@
 # Usage: sorttv "RIP_FOLDER" "Show Name" SEASON FIRST_EPISODE [MIN_MINUTES] [MAX_MINUTES] [LAST_EPISODE]
 # Titles are processed in disc order: the number after the final "_t" in the
 # file name, which MakeMKV adds by default.
-#   longer than 2.5x MIN_MINUTES      -> treated as "Play All" and DELETED
+#   longer than 2.5x MIN_MINUTES      -> treated as "Play All" and moved to
+#                                        _duplicates/ (never deleted: it could be
+#                                        a feature-length special)
 #   MIN_MINUTES to MAX_MINUTES incl.  -> episode, numbered from FIRST_EPISODE,
 #                                        unless it duplicates an episode already
 #                                        in the season or earlier on this disc
@@ -17,9 +19,20 @@
 # KEEP_EXTRAS=0 in the show's tv/<Show>/.ripsort deletes extras SHORTER than
 # MIN_MINUTES instead (longer oddities still go to extras/ so nothing that
 # could be an episode is lost).
-# MIN defaults to 18, MAX to MIN+5. Numbering never goes past LAST_EPISODE
-# (surplus goes to extras/ with a warning). An episode file that already
-# exists is never overwritten. The final line is EPISODES=N for ripwatch.
+# A title whose length ffprobe can't read stops the sort before anything
+# moves (exit code 3, so ripwatch parks the disc).
+# MIN defaults to 18, MAX to MIN+5. An episode file that already exists is
+# never overwritten. The final line is EPISODES=N for ripwatch.
+# Split episodes: PARTS_S<n>="EP:COUNT ..." in the show's .ripsort (e.g.
+# PARTS_S6="1:2") says episode EP is stored as COUNT consecutive titles. They
+# are named "Show - sNNeEE - part1.mkv", "part2"... (Jellyfin's multi-part
+# naming) and count as ONE episode for numbering, LAST_EPISODE and EPISODES=N.
+# Numbering never goes past LAST_EPISODE: if an episode-length title would,
+# nothing moves and the disc is parked (exit 3) with a Problem message, since
+# the series may hold a split episode or have the wrong total.
+# Resumable: each filed episode is recorded in the rip folder's .sorted-episodes
+# straight after it is moved. If a sort stops partway, running it again with
+# the same arguments carries on numbering after the episodes already filed.
 set -euo pipefail
 
 src="/srv/media/rips/$1"
@@ -35,18 +48,32 @@ extras="/srv/media/rips/extras/$show"
 dupes="/srv/media/rips/_duplicates/$show"
 mkdir -p "$dest"
 
-# Per-show setting (only KEEP_EXTRAS is used here; lengths come from the arguments).
+# Per-show settings (KEEP_EXTRAS and PARTS_S<season>; lengths come from the arguments).
 KEEP_EXTRAS=1
+PARTS=""
 showcfg="/srv/media/rips/tv/$show/.ripsort"
 if [ -f "$showcfg" ]; then
   KEEP_EXTRAS=$(sed -nE 's/^KEEP_EXTRAS=([01])$/\1/p' "$showcfg" | tail -n1)
   KEEP_EXTRAS="${KEEP_EXTRAS:-1}"
+  PARTS=$(sed -nE "s/^PARTS_S0*${season}=[\"']?([0-9: ]*)[\"']?[[:space:]]*\$/\1/p" "$showcfg" | tail -n1)
 fi
+# Split episodes: NPARTS[episode] = how many titles it is stored as.
+declare -A NPARTS=()
+for pr in $PARTS; do
+  [[ "$pr" =~ ^0*([0-9]+):0*([0-9]+)$ ]] && [ "${BASH_REMATCH[2]}" -ge 2 ] && NPARTS[${BASH_REMATCH[1]}]=${BASH_REMATCH[2]}
+done
+nparts() { printf '%s' "${NPARTS[$1]:-1}"; }
+# File name for part $2 (0-based) of episode $1.
+epname() {
+  if [ "$(nparts "$1")" -gt 1 ]; then printf "%s - s%02de%02d - part%d.mkv" "$show" "$season" "$1" "$(($2 + 1))"
+  else printf "%s - s%02de%02d.mkv" "$show" "$season" "$1"; fi
+}
 
 minsecs=$((min * 60))
 maxsecs=$((max * 60))
 playall=$((minsecs * 5 / 2))
-found=0
+found=0      # whole episodes filed from this disc (a split episode counts once)
+part=0       # parts of episode $ep already filed (0 unless it is split)
 
 # Fingerprint: exact size plus a hash of 8 MiB from the middle of the file.
 # MakeMKV writes a different header and trailer for every title, so the
@@ -104,8 +131,23 @@ ordered() {
 mapfile -t files < <(ordered)
 declare -a lens=()
 for i in "${!files[@]}"; do
-  lens[i]=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "${files[$i]}" | cut -d. -f1)
+  lens[i]=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "${files[$i]}" 2>/dev/null | cut -d. -f1) || lens[i]=""
 done
+# A title whose length can't be read can't be told apart from an episode, an
+# extra or a play-all, so stop before anything moves. Exit 3 = park the disc.
+bad=()
+for i in "${!files[@]}"; do [[ "${lens[$i]}" =~ ^[0-9]+$ ]] || bad+=("${files[$i]}"); done
+if [ "${#bad[@]}" -gt 0 ]; then
+  echo "Problem: Unreadable length: ffprobe couldn't read how long ${#bad[@]} title(s) on this disc are, so they can't be sorted:"
+  printf '  %s\n' "${bad[@]}"
+  echo "How to fix it: check whether the file plays (the first command). If it doesn't, delete it or re-rip the disc; then queue the disc again (the second command):"
+  echo
+  echo "    ffprobe -v error -show_entries format=duration -of csv=p=0 \"${bad[0]}\""
+  echo "    mv \"$src/.pending\" \"$src/.done\""
+  echo
+  echo "Nothing was changed. The disc is parked as .pending."
+  exit 3
+fi
 
 # Reconcile the episode-length titles with the disc's Play All length(s).
 drop=-1
@@ -156,18 +198,86 @@ if [ "$pa_sum" -gt 0 ] && [ "${#cand_idx[@]}" -gt 1 ]; then
 fi
 
 dsecs=(); dsize=(); dname=()
+
+# Record that part $1 (1-based) of episode $ep was filed, and move on: to the
+# next part, or to the next episode once all its parts are in.
+advance() {
+  if [ "$1" -ge "$(nparts "$ep")" ]; then ep=$((ep + 1)); part=0; found=$((found + 1)); else part=$1; fi
+}
+
+# Resume an interrupted sort of this disc: count what it already filed and
+# carry on numbering after it. Progress lines are "EP:PART name". The progress
+# file is created just before the first move, so its absence means nothing
+# from this disc was filed yet.
+progress="$src/.sorted-episodes"
+fresh=1
+if [ -e "$progress" ]; then
+  fresh=0
+  while read -r tag pname; do
+    [ -n "$pname" ] || continue
+    pep=${tag%%:*}; pk=${tag#*:}; [ "$pk" = "$tag" ] && pk=1
+    ep=$pep; advance "$pk"
+    if [ -e "$dest/$pname" ]; then
+      dsecs+=("$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$dest/$pname" | cut -d. -f1)")
+      dsize+=("$(stat -c %s "$dest/$pname")"); dname+=("$pname")
+    fi
+  done < "$progress"
+  # A stop between a move and its progress line leaves at most one title
+  # filed but unrecorded: it has the next name, so count it too.
+  next=$(epname "$ep" "$part")
+  if [ -e "$dest/$next" ]; then
+    printf '%s:%s %s\n' "$ep" "$((part + 1))" "$next" >> "$progress"
+    advance "$((part + 1))"
+  fi
+  echo "Resuming an interrupted sort: $found episodes from this disc were already filed, so numbering carries on from e$ep${part:+$([ "$part" -gt 0 ] && echo " part $((part + 1))")}."
+fi
+
+# Before anything moves: would an episode-length title be numbered past the
+# series total? Walk the titles that will become episodes (cand_idx: not
+# duplicates, not play-alls) exactly as the loop below numbers them. If any
+# would go over, park the disc instead of filing a real episode as an extra.
+over=(); dep=$ep; dpart=$part
+for i in "${cand_idx[@]}"; do
+  if [ -n "$last" ] && [ "$dep" -gt "$last" ]; then over+=("$(basename "${files[$i]}")  (${lens[$i]} s)"); continue; fi
+  [ -e "$dest/$(epname "$dep" "$dpart")" ] && continue   # goes to extras as "exists", as before
+  dpart=$((dpart + 1))
+  if [ "$dpart" -ge "$(nparts "$dep")" ]; then dep=$((dep + 1)); dpart=0; fi
+done
+if [ "${#over[@]}" -gt 0 ]; then
+  lens_cmd='for f in "'"$src"'"/*.mkv; do printf "%s  %s s\n" "$(basename "$f")" "$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$f" | cut -d. -f1)"; done'
+  echo "Problem: Over the episode total: ${#over[@]} episode-length title(s) on this disc would be numbered past episode $last, the total set for $show series $season (TOTAL_S$season):"
+  printf '  %s\n' "${over[@]}"
+  echo "How to fix it: the series may contain an episode split across two or more titles (a double-length premiere or finale stored in parts), or its total may be wrong. List this disc's title lengths to compare with the episode list (the first command). See what's already in the season (the second command):"
+  echo
+  echo "    $lens_cmd"
+  echo "    ls \"$dest\""
+  echo
+  echo "If an episode is split, record it in the show's settings (change 1:2 to the episode number and how many titles it is stored as; if a PARTS_S$season line is already there, add to that line instead), then queue the disc again:"
+  echo
+  echo "    printf 'PARTS_S$season=\"1:2\"\\n' >> \"$showcfg\" && mv \"$src/.pending\" \"$src/.done\""
+  echo
+  echo "If the total is wrong, set the right one (change $((last + 1)) to the real number of episodes); this also queues the disc again:"
+  echo
+  echo "    ~/bin/newseries \"$show\" $season $((last + 1))"
+  echo
+  echo "Nothing was changed. The disc is parked as .pending."
+  exit 3
+fi
+[ "$fresh" -eq 1 ] && : > "$progress"
+
 for i in "${!files[@]}"; do
   f="${files[$i]}"
   secs="${lens[$i]}"
   if [ "$secs" -ge "$playall" ]; then
-    rm -f "$f"
-    echo "Deleted play-all: $(basename "$f")  ($secs s)"
+    mkdir -p "$dupes"
+    mv --backup=numbered "$f" "$dupes/"
+    echo "Play-all moved to _duplicates/$show, not deleted: $(basename "$f")  ($secs s)"
   elif [ "$i" -eq "$drop" ]; then
     to_extras "$f"
     echo "Extra:   $(basename "$f")  ($secs s)"
   elif [ "$secs" -ge "$minsecs" ] && [ "$secs" -le "$maxsecs" ]; then
     key=$(fp "$f")
-    name=$(printf "%s - s%02de%02d.mkv" "$show" "$season" "$ep")
+    name=$(epname "$ep" "$part")
     if [ -n "${seen[$key]:-}" ]; then
       mkdir -p "$dupes"
       mv "$f" "$dupes/"
@@ -184,11 +294,11 @@ for i in "${!files[@]}"; do
       echo "WARNING exists: $name already on disk, $(basename "$f")  ($secs s) sent to extras"
     else
       mv "$f" "$dest/$name"
+      printf '%s:%s %s\n' "$ep" "$((part + 1))" "$name" >> "$progress"
       seen["$key"]="$name"
       dsecs+=("$secs"); dsize+=("$(stat -c %s "$dest/$name")"); dname+=("$name")
       echo "Episode: $name  ($secs s)"
-      ep=$((ep + 1))
-      found=$((found + 1))
+      advance "$((part + 1))"
     fi
   elif [ "$KEEP_EXTRAS" = "0" ] && [ "$secs" -lt "$minsecs" ]; then
     rm -f "$f"
@@ -199,7 +309,10 @@ for i in "${!files[@]}"; do
   fi
 done
 
-rm -f "$src/.done" "$src/.pending"
+if [ "$part" -gt 0 ]; then
+  echo "WARNING split episode: e$ep has only $part of its $(nparts "$ep") parts on this disc, so it isn't counted yet. If its other part is on the next disc, check that disc's numbering by hand."
+fi
+rm -f "$src/.done" "$src/.pending" "$src/.sorting" "$progress"
 rmdir "$src" 2>/dev/null || echo "Left $src in place (not empty)."
 echo "Episodes from this disc: $found"
 echo "EPISODES=$found"

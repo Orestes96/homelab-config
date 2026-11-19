@@ -12,19 +12,40 @@
 # Studio-code labels (e.g. EC_108887) are mapped to a show and season in
 # ~/.config/ripsort/labels, one per line: LABEL|Show Name|SEASON
 # MakeMKV's random "-XXXXXX" suffix on repeat labels is ignored for the lookup.
+# A label with no show name or no season is parked (.pending) for relabel; the
+# old series.conf fallback (and its MODE switch) is no longer read.
+# Markers: .done is renamed to .sorting while a sort runs. Success removes the
+# folder; a failed sort leaves .failed holding the reason (and keeps .film). A
+# .sorting left behind by a sort that was killed becomes .failed on the next run.
 set -uo pipefail
 
-CONF="$HOME/.config/ripsort/series.conf"
 LABELS="$HOME/.config/ripsort/labels"
 LOG="$HOME/.config/ripsort/ripwatch.log"
-TOPIC=$(cat "$HOME/.ntfy-rips-topic")
+TOPIC=$(cat "$HOME/.ntfy-rips-topic" 2>/dev/null)
 RIPS="/srv/media/rips"
 TV="$RIPS/tv"
 
 exec 9>"$HOME/.config/ripsort/.lock"
 flock -n 9 || exit 0
 
-notify() { curl -s -d "$1" "https://ntfy.sh/$TOPIC" >/dev/null; }
+# Phone alerts. A missing topic file or a failed send is written to the log
+# (it shows under Recent sorts on the dashboard) and to stderr, which cron
+# mails, so it is never silent.
+warn_notify() {  # $1 = problem, $2 = how to fix, $3 = command, $4 = the unsent message
+  printf '\n== %s  ntfy ==\nProblem: %s\nHow to fix it: %s\n\n    %s\n\nNothing was changed. This message was not sent to your phone:\n%s\n' \
+    "$(date '+%F %T')" "$1" "$2" "$3" "$4" | tee -a "$LOG" >&2
+}
+notify() {
+  if [ -z "$TOPIC" ]; then
+    warn_notify "there is no ntfy topic in ~/.ntfy-rips-topic, so phone alerts can't be sent." \
+      "Put your topic name in the file (change mytopic to yours):" "echo mytopic > ~/.ntfy-rips-topic" "$1"
+    return 1
+  fi
+  curl -fsS -m 10 -d "$1" "https://ntfy.sh/$TOPIC" >/dev/null 2>&1 && return 0
+  warn_notify "couldn't reach ntfy.sh within 10 seconds, so a phone alert wasn't sent." \
+    "Check the server can reach ntfy (200 means it can):" "curl -sS -m 10 -o /dev/null -w '%{http_code}\n' https://ntfy.sh/" "$1"
+  return 1
+}
 # Normalise a name for matching: lowercase, drop leading "the", drop
 # non-alphanumerics, drop a trailing "s" so SIMPSON and SIMPSONS match.
 norm()   { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/^the //; s/[^a-z0-9]//g; s/s$//'; }
@@ -71,35 +92,70 @@ find_show() {
   return 1
 }
 
+# A failed sort. Sets FAIL_FILE, the .failed marker's text (line 1: who wrote
+# it and why; line 2: "Fix: " and the command; then the details), and FAIL_MSG,
+# the notification, which starts with "Problem:". The fix is the tool's own
+# first command when it printed a How to fix it, otherwise a retry.
+fail_text() {  # $1 = reason (one line), $2 = tool output (may be empty), $3 = rip folder path
+  local fix how details cmd
+  fix="rm -f \"$3/.failed\" && touch \"$3/.done\""
+  how="How to fix it: fix the cause above, then queue it again. Anything already filed is kept, and TV numbering carries on where it stopped:
+
+    $fix
+
+Some files may already have been filed; the rest are still in $3."
+  details=$(printf '%s\n' "$2" | sed '0,/^Problem: /{/^Problem: /d}')
+  if printf '%s\n' "$2" | grep -q '^How to fix it:'; then
+    cmd=$(printf '%s\n' "$2" | sed -n 's/^    \([^ ].*\)$/\1/p' | head -n1)
+    [ -n "$cmd" ] && fix="$cmd"
+    how=""
+  fi
+  FAIL_MSG="Problem: sorting $(basename "$3") failed: $1"
+  [ -n "$details" ] && FAIL_MSG="$FAIL_MSG
+$details"
+  [ -n "$how" ] && FAIL_MSG="$FAIL_MSG
+$how"
+  FAIL_FILE="ripwatch: sort failed: $1
+Fix: $fix
+
+$FAIL_MSG"
+}
+
+# A .sorting marker here means a sort was killed (reboot, crash) before it
+# finished; this run holds the lock, so no sort is running now.
+for stale in "$RIPS"/*/.sorting; do
+  [ -e "$stale" ] || continue
+  sdir=$(dirname "$stale")
+  fail_text "the sort was interrupted (reboot or crash) before it finished." "" "$sdir"
+  printf '%s\n' "$FAIL_FILE" > "$sdir/.failed" && rm -f "$stale"
+  printf "\n== %s  %s ==\n%s\n" "$(date '+%F %T')" "$(basename "$sdir")" "$FAIL_MSG" >> "$LOG"
+  notify "$FAIL_MSG"
+done
+
 for marker in "$RIPS"/*/.done; do
   [ -e "$marker" ] || continue
   dir=$(dirname "$marker"); folder=$(basename "$dir")
-  rm -f "$marker"
-  # shellcheck source=/dev/null
-  source "$CONF"
+  mv "$marker" "$dir/.sorting" || continue
   out=""
   assumed=""
+  failed=""
 
   # A rip started as a film (rescuerip --film) carries its title in .film
-  # and goes to Movies whatever the mode.
+  # and goes to Movies whatever the mode. sortfilm removes .film only once
+  # the film is filed.
   if [ -f "$dir/.film" ]; then
-    ftitle=$(head -n1 "$dir/.film"); rm -f "$dir/.film"
-    out=$("$HOME/bin/sortfilm" "$folder" "$ftitle" 2>&1)
-    "$HOME/bin/engdefault" "$RIPS/movies/$ftitle" >/dev/null 2>&1
+    ftitle=$(head -n1 "$dir/.film")
+    if out=$("$HOME/bin/sortfilm" "$folder" "$ftitle" 2>&1); then
+      "$HOME/bin/engdefault" "$RIPS/movies/$ftitle" >/dev/null 2>&1
+    else
+      rc=$?
+      reason=$(printf '%s\n' "$out" | sed -n 's/^Problem: //p' | head -n1)
+      fail_text "${reason:-sortfilm stopped before finishing (exit code $rc).}" "$out" "$dir"; failed=1
+    fi
   else
-  case "${MODE:-off}" in
-    off)
-      out="Sorting is off. $folder left in place." ;;
-    film)
-      out=$("$HOME/bin/sortfilm" "$folder" "$TITLE" 2>&1) ;;
-    tv)
+      # Otherwise it is TV.
       parse_label "$folder"
       show=$(find_show "$SHOW_RAW") || show=""
-      # Fallback to series.conf when the label gives no usable show name.
-      if [ -z "$show" ] && [ -n "${SHOW:-}" ] && { [ -z "$SHOW_RAW" ] || [ "$(norm "$SHOW")" = "$(norm "$SHOW_RAW")" ]; }; then
-        show="$SHOW"
-      fi
-      [ -z "$SEASON" ] && SEASON="${SEASON_DEFAULT:-}"
 
       unset MIN_MINUTES MAX_MINUTES "${!MAX_MINUTES_S@}"; unset "${!DISCS_S@}" "${!TOTAL_S@}"
       cfg="$TV/${show:-_}/.ripsort"
@@ -126,15 +182,62 @@ for marker in "$RIPS"/*/.done; do
       read -ra counts <<< "${!mapvar:-}"
       total="${!totvar:-}"
 
-      if [ -z "$show" ]; then
-        parked="Unknown show: $folder (label show='${SHOW_RAW:-?}'). Run: newseries \"Show Name\" SEASON TOTAL  then it will sort. For a studio-code label, add LABEL|Show Name|SEASON to ~/.config/ripsort/labels."
+      asfilm="If it's a film, not TV, file it as a film instead (put in its title and year):
+
+    echo \"Title (Year)\" > \"$dir/.film\" && mv \"$dir/.pending\" \"$dir/.done\""
+      if [ -z "$SHOW_RAW" ]; then
+        parked="Problem: Unreadable label: $folder has no show name in it (a generic disc label), so it can't be sorted.
+How to fix it: relabel it with the season, disc and show (change these to match the disc), and it sorts within a minute:
+
+    ~/bin/relabel $folder ${SEASON:-1} ${DISC:-1} \"Show Name\"
+
+$asfilm
+
+Nothing was changed. The rip is parked as .pending."
+      elif [ -z "$show" ]; then
+        parked="Problem: Unknown show: $folder (label show '$SHOW_RAW') doesn't match any show folder.
+How to fix it: for a new show, set it up (change the season and episode total), and it sorts within a minute:
+
+    ~/bin/newseries \"Show Name\" ${SEASON:-1} 10
+
+For a show you already have under another name, relabel it:
+
+    ~/bin/relabel $folder ${SEASON:-1} ${DISC:-1} \"Show Name\"
+
+For a studio-code label, add LABEL|Show Name|SEASON to ~/.config/ripsort/labels instead.
+$asfilm
+
+Nothing was changed. The rip is parked as .pending."
       elif [ -z "$SEASON" ] || [ -z "$DISC" ]; then
-        parked="Unreadable label: $folder (season='${SEASON:-?}', disc='${DISC:-?}'). Label needs S<n> and D<n>; or sort by hand with sorttv."
+        parked="Problem: Unreadable label: $folder has no season number, so it can't be sorted.
+How to fix it: relabel it with the season and disc (change these to match the disc), and it sorts within a minute:
+
+    ~/bin/relabel $folder 1 ${DISC:-1} \"$show\"
+
+Nothing was changed. The rip is parked as .pending."
       elif [ -f "$record" ] && grep -q "^$DISC " "$record"; then
-        out="Disc $DISC of $show series $SEASON was already sorted. $folder left in place."
+        parked="Problem: Disc $DISC of $show series $SEASON was already sorted, so $folder looks like a second rip of it.
+How to fix it: if the disc number in the label is wrong, relabel it (change the disc number):
+
+    ~/bin/relabel $folder $SEASON $DISC \"$show\"
+
+If it really is a second rip you don't need, delete it:
+
+    rm -r \"$dir\"
+
+Nothing was changed. The rip is parked as .pending."
       elif [ "${#counts[@]}" -gt 0 ]; then
         if [ "$DISC" -gt "${#counts[@]}" ]; then
-          parked="Disc $DISC is outside the series $SEASON disc map for $show (${counts[*]}). Fix .ripsort, then it will sort."
+          parked="Problem: Disc $DISC is outside the series $SEASON disc map for $show, which has ${#counts[@]} discs (${counts[*]}).
+How to fix it: if the label's disc number is right, set the series up again with every disc's episode count (change the total and the counts), and it sorts within a minute:
+
+    ~/bin/newseries \"$show\" $SEASON ${total:-TOTAL} \"${counts[*]} N\"
+
+If the label is wrong, relabel it instead:
+
+    ~/bin/relabel $folder $SEASON 1 \"$show\"
+
+Nothing was changed. The rip is parked as .pending."
         else
           first=1; i=0
           for c in "${counts[@]}"; do
@@ -160,17 +263,24 @@ for marker in "$RIPS"/*/.done; do
         touch "$dir/.pending"
         out="$parked"
       elif [ -n "$first" ]; then
-        out=$("$HOME/bin/sorttv" "$folder" "$show" "$SEASON" "$first" "$min" "$max" "$last" 2>&1)
+        out=$("$HOME/bin/sorttv" "$folder" "$show" "$SEASON" "$first" "$min" "$max" "$last" 2>&1); rc=$?
         found=$(printf '%s\n' "$out" | sed -n 's/^EPISODES=\([0-9]*\)$/\1/p' | tail -n1)
         out=$(printf '%s\n' "$out" | grep -v '^EPISODES=')
-        if [ -n "$found" ] && [ -n "$assumed" ] && [ "$found" -eq 0 ]; then
+        [ "$rc" -ne 0 ] && found=""
+        if [ "$rc" -eq 3 ]; then
+          # sorttv found a title it can't read the length of and moved nothing.
+          touch "$dir/.pending"
+        elif [ -z "$found" ]; then
+          fail_text "sorttv stopped before finishing (exit code $rc), so nothing was recorded in .discs." "$out" "$dir"; failed=1
+        elif [ -n "$assumed" ] && [ "$found" -eq 0 ]; then
           out="$out
 No new episodes on this disc, so it is probably a re-rip of a disc already sorted. Nothing recorded."
-        elif [ -n "$found" ]; then
+        else
           mkdir -p "$seasondir"
           printf '%s %s\n' "$DISC" "$found" >> "$record"
           "$HOME/bin/engdefault" "$seasondir" >/dev/null 2>&1
-          have=$(ls "$seasondir"/*.mkv 2>/dev/null | wc -l)
+          # Distinct episode numbers, so a split episode's part files count once.
+          have=$(ls "$seasondir"/*.mkv 2>/dev/null | sed -nE 's/.* - s[0-9]+e([0-9]+)( - part[0-9]+)?\.mkv$/\1/p' | sort -u | wc -l)
           out="$out
 Disc $DISC: $found episodes from e$first. Series $SEASON: $have of ${total:-?} on disk."
           [ "$found" -eq 0 ] && out="$out
@@ -182,17 +292,32 @@ WARNING: no episode-length titles found on this disc."
               mv "$p" "$(dirname "$p")/.done"
             fi
           done
-        else
-          out="$out
-WARNING: sorttv did not complete; nothing recorded. $folder left in place."
         fi
-      fi ;;
-  esac
+      fi
   fi
 
-  [ -n "$assumed" ] && out="$assumed
+  # Finish with the markers: .failed with the reason, or just drop .sorting
+  # (parked rips already have .pending; a sorted rip's folder is gone).
+  if [ -n "$failed" ]; then
+    out="$FAIL_MSG"
+    [ -d "$dir" ] && printf '%s\n' "$FAIL_FILE" > "$dir/.failed" && rm -f "$dir/.sorting"
+  elif [ -d "$dir" ]; then
+    rm -f "$dir/.sorting"
+  fi
+
+  # A problem goes out starting with "Problem:"; anything else is prefixed with
+  # the folder name as before.
+  if [ "${out#Problem:}" != "$out" ]; then
+    [ -n "$assumed" ] && out="$out
+
+Note: $assumed"
+    msg="$out"
+  else
+    [ -n "$assumed" ] && out="$assumed
 $out"
+    msg="$folder
+$out"
+  fi
   printf "\n== %s  %s ==\n%s\n" "$(date '+%F %T')" "$folder" "$out" >> "$LOG"
-  notify "$folder
-$out"
+  notify "$msg"
 done

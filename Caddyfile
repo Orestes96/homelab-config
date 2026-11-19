@@ -35,9 +35,6 @@ http://tv.home.arpa {
     reverse_proxy localhost:8409
 }
 
-http://makemkv.home.arpa {
-    reverse_proxy localhost:5800
-}
 
 http://adguard.home.arpa {
     reverse_proxy localhost:3000
@@ -99,8 +96,11 @@ http://lazylibrarian.home.arpa {
 }
 
 http://rips.home.arpa {
+    # Home network (192.168.0.0/24) and this server only; everything else gets 403.
+    @outside not remote_ip 192.168.0.0/24 127.0.0.0/8 ::1 192.168.20.100
+    respond @outside "Problem: the rips dashboard only answers on the home network. How to fix it: open it from a device on 192.168.0.x. Nothing was changed." 403
     reverse_proxy /api/* 127.0.0.1:3014
-reverse_proxy 127.0.0.1:3013
+    reverse_proxy 127.0.0.1:3013
 }
 
 http://coffee.home.arpa {

@@ -1,22 +1,56 @@
 #!/usr/bin/env bash
 # Usage: sortfilm "RIP_FOLDER" "Title (Year)"
 # Moves the largest .mkv to movies/, the rest to extras/, removes the rip folder.
+# Never overwrites: if the film or any of the extras is already in the library,
+# it stops before moving anything. The rip folder's .film and .sorting markers
+# are removed only once everything has been filed.
 set -euo pipefail
 
 src="/srv/media/rips/$1"
 title="$2"
 movies="/srv/media/rips/movies/$title"
 extras="/srv/media/rips/extras/$title"
+dupes="/srv/media/rips/_duplicates/$title"
+retry="rm -f \"$src/.failed\" && touch \"$src/.done\""
 
-mkdir -p "$movies" "$extras"
+problem() {
+  printf 'Problem: %s\nHow to fix it: %s\n\n%s\n\nNothing was changed.\n' "$1" "$2" "$3"
+  exit 1
+}
 
-main=$(ls -S "$src"/*.mkv | head -n 1)
-mv "$main" "$movies/$title.mkv"
+main=$(ls -S "$src"/*.mkv 2>/dev/null | head -n 1) || true
+[ -n "$main" ] || problem "$src has no .mkv files, so there is nothing to file as $title." \
+  "Check what the rip folder holds. If the rip failed, delete the folder and rip the disc again." \
+  "    ls -la \"$src\""
 
-if ls "$src"/*.mkv >/dev/null 2>&1; then
-  mv "$src"/*.mkv "$extras/"
+if [ -e "$movies/$title.mkv" ]; then
+  problem "$title is already in the library, and filing this rip would overwrite it.
+  Already in the library: $movies/$title.mkv
+  New rip:                $main" \
+    "To replace it, move the old one to _duplicates and queue the new rip again (first command). To keep the film you already have, delete the new rip instead (second command)." \
+    "    mkdir -p \"$dupes\" && mv -n \"$movies/$title.mkv\" \"$dupes/\" && $retry
+
+    rm -r \"$src\""
 fi
 
-rmdir "$src"
+for f in "$src"/*.mkv; do
+  [ "$f" = "$main" ] && continue
+  if [ -e "$extras/$(basename "$f")" ]; then
+    problem "An extra with the same name is already filed for $title, and filing this rip would overwrite it.
+  Already in the library: $extras/$(basename "$f")
+  New rip:                $f" \
+      "This is probably a second rip of the same disc. Move the old extras to _duplicates, then queue the new rip again:" \
+      "    mkdir -p \"$dupes\" && mv -n \"$extras\" \"$dupes/extras-$(date +%Y%m%d-%H%M%S)\" && $retry"
+  fi
+done
+
+mkdir -p "$movies" "$extras"
+mv -n "$main" "$movies/$title.mkv"
+for f in "$src"/*.mkv; do
+  [ -e "$f" ] && mv -n "$f" "$extras/"
+done
+
+rm -f "$src/.film" "$src/.sorting" "$src/.done"
+rmdir "$src" 2>/dev/null || echo "Left $src in place (not empty)."
 echo "Feature:  $movies/$title.mkv"
 echo "Extras:   $extras/"
